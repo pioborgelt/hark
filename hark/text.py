@@ -54,3 +54,38 @@ def encode(text, language, vocab, version="legacy-lower-v1", pronunciation_versi
     if missing:
         raise ValueError(f"Untrained phonemes {missing}; use a supported phrase")
     return [vocab[p] for p in seq]
+
+
+def encode_multi(text, language, vocab, version="legacy-lower-v1", pronunciation_version="espeak-v1"):
+    version = version or "legacy-lower-v1"
+    base = encode(text, language, vocab, version, pronunciation_version)
+    if language != "en":
+        return [base]
+    seqs = [base]
+    ignored = " ˈˌː.,!?;:\"'()\n\r-"
+    source = text.strip().lower() if version == "legacy-lower-v1" else text.strip()
+    rp = [p for s in phonemizer().phonemize("en-gb-x-rp", source) for p in s if p not in ignored and not p.isspace()]
+    if rp and all(p in vocab for p in rp):
+        alt = [vocab[p] for p in rp]
+        if (len(alt) >= len(base) or len(alt) >= 8) and alt not in seqs:
+            seqs.append(alt)
+    inv = {i: p for p, i in vocab.items()}
+    names = [inv[t] for t in base]
+    if "ɾ" in names and "t" in vocab:
+        t_seq = [vocab["t"] if inv[t] == "ɾ" else (vocab["ɜ"] if inv[t] == "ɚ" and "ɜ" in vocab else t) for t in base]
+        if t_seq not in seqs:
+            seqs.append(t_seq)
+    low = text.strip().lower()
+    if low.endswith("a") and names[-1] in ("ə", "ɐ"):
+        pairs = ([("a", "a"), ("a", "ɛ"), ("ɐ", "ɛ"), ("ɐ", "ɚ")]
+                 if low.startswith("a") and names[0] in ("ɐ", "ə")
+                 else [(names[0], x) for x in ("a", "ɛ", "ɚ")])
+        for init_p, end_p in pairs:
+            if init_p in vocab and end_p in vocab:
+                cand = list(base)
+                cand[0] = vocab[init_p]
+                cand[-1] = vocab[end_p]
+                if cand not in seqs:
+                    seqs.append(cand)
+    return seqs
+
