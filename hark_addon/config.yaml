@@ -1,0 +1,30 @@
+name: "Hark Wake Word (Zero-Shot EN/DE)"
+description: "Type any English or German wake phrase as text — zero audio samples or training required."
+version: "0.3.0"
+slug: "hark_wakeword"
+url: "https://github.com/pioborgelt/hark"
+init: false
+arch:
+  - amd64
+  - aarch64
+ports:
+  10400/tcp: 10400
+ports_description:
+  10400/tcp: "Wyoming Protocol TCP port"
+discovery:
+  - wyoming
+options:
+  phrases:
+    - "Okay Haus:de"
+    - "Hey Jarvis:en"
+  sensitivity: "balanced"
+  threads: 2
+  log_near_misses: true
+  save_debug_clips: false
+schema:
+  phrases:
+    - str
+  sensitivity: list(strict|balanced|sensitive)
+  threads: int(1,8)
+  log_near_misses: bool
+  save_debug_clips: bool

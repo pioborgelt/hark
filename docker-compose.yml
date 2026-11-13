@@ -1,0 +1,16 @@
+services:
+  wyoming-hark:
+    build: .
+    container_name: wyoming-hark
+    restart: unless-stopped
+    ports:
+      - "10400:10400"
+    environment:
+      # Semicolon-separated list of "<Phrase>:<en|de>" wake phrases (zero training needed!)
+      HARK_PHRASES: "Okay Haus:de;Hey Jarvis:en"
+      # strict | balanced | sensitive | 0.0..1.0
+      HARK_SENSITIVITY: "balanced"
+      HARK_THREADS: "2"
+      HARK_LOG_NEAR_MISSES: "true"
+    volumes:
+      - ./hark-data:/data

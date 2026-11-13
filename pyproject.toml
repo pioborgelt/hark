@@ -4,10 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hark-ww"
-version = "0.1.0"
-description = "Experimental text-enrolled streaming phoneme wakeword model"
+version = "0.3.0a0"
+description = "Zero-shot text-enrolled bilingual (EN/DE) two-stage wake-word engine"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
-dependencies = ["torch>=2.5,<3", "numpy>=2,<3", "scipy>=1.14,<2", "soundfile>=0.12,<1", "piper-tts==1.3.0"]
+dependencies = [
+    "torch>=2.5,<3",
+    "numpy>=2,<3",
+    "scipy>=1.14,<2",
+    "soundfile>=0.12,<1",
+    "piper-tts==1.3.0",
+]
+
+[project.scripts]
+hark = "hark.app:main"
+wyoming-hark = "hark.wyoming_server:main"
+
+[project.optional-dependencies]
+wyoming = ["wyoming>=1.5,<2"]
+microphone = ["sounddevice>=0.5,<0.6"]
+research = ["pyarrow>=19,<24", "pytest>=8,<10", "matplotlib>=3.9,<4", "numba>=0.61,<0.66"]
 
 [tool.setuptools.packages.find]
 include = ["hark*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
