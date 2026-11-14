@@ -10,3 +10,6 @@ reports/
 hark-data/
 models/
 *.pt
+hark_addon/local/wheels/
+hark_addon/local/models/
+AGENT_NOTE*.md
