@@ -11,34 +11,27 @@ I originally built Hark for my own voice assistant, PAI. Its old wake-word engin
 
 > **Alpha Preview (v0.3.0-alpha).** Runs on Linux x86_64 and ARM64 (Raspberry Pi 4/5, N100, mini PCs). It isn't optimised yet; faster builds, and maybe one day an ESP32 version, are on the list.
 
----
+## Getting started
 
-## Install (Home Assistant & Python)
+Hark only does the wake word part. Your voice assistant still needs speech-to-text and text-to-speech (the Whisper or Speech-to-Phrase app plus Piper work fine), and some device that streams its microphone to Home Assistant. If you get stuck anywhere, the [FAQ](docs/FAQ.md) probably has it.
 
-**Before you start:** Hark only provides the wake word. Your voice assistant also needs
-speech-to-text and text-to-speech (e.g. the **Whisper** or **Speech-to-Phrase** and **Piper**
-apps), and a device that streams audio to Home Assistant. Stuck? See the [FAQ](docs/FAQ.md)!
+### Home Assistant OS (easiest)
 
-### Option 1: Home Assistant OS app (recommended)
+1. Go to Settings > Apps > Install app, open the three-dot menu in the top right, pick "Repositories" and add `https://github.com/pioborgelt/hark`.
+2. Search the store for "hark", open Hark Wake Word and install it.
+3. On the Configuration tab, add your phrases, for example `Hallo Kühlschrank:de` or `Hey Jarvis:en`. Save, then start the app from the Info tab.
+4. Home Assistant should now find it by itself: Settings > Devices & services, under "Discovered", click Add on Hark Wake Word.
+5. Open Settings > Voice assistants and your assistant. The wake word option is a bit hidden: it's in the three-dot menu of that dialog as "Add streaming wake word". Choose hark as the engine and your phrase as the wake word.
 
-1. **Settings → Apps → Install app → ⋮ (top right) → Repositories → Add** →
-   `https://github.com/pioborgelt/hark`
-2. Search the store for **hark**, open **Hark Wake Word** → **Install**.
-3. **Configuration**: add phrases like `Hallo Kühlschrank:de` or `Hey Jarvis:en` → **Save** →
-   **Info → Start**.
-4. **Settings → Devices & services → Discovered → Hark Wake Word → Add.**
-5. **Settings → Voice assistants →** your assistant **→ ⋮ → Add streaming wake word** →
-   engine **hark**, wake word = your phrase.
-
-6. Say the phrase, pause for a beat, then your command.
+That's it. Say the phrase, pause for a beat, then say your command.
 
 (If the menu points differ here or you can't follow the guide, please [open an issue](https://github.com/pioborgelt/hark/issues/new). I try to keep hark as accessible as possible.)
 
-No host port is opened, so it runs next to the openWakeWord app.
+The app doesn't open a port on your host, so it happily runs next to openWakeWord.
 
-### Option 2: Docker + Home Assistant (Container, Core, or a separate machine)
+### Docker (Home Assistant Container, Core, or another machine)
 
-Run the Wyoming server with whatever English or German phrases you want (separated by `;`):
+Start the Wyoming server with whatever English or German phrases you like, separated by `;`:
 
 ```bash
 docker run -d --name wyoming-hark --restart unless-stopped \
@@ -49,34 +42,26 @@ docker run -d --name wyoming-hark --restart unless-stopped \
   ghcr.io/pioborgelt/hark:alpha
 ```
 
-*(Or clone this repo and run `docker compose up -d`. The ~31 MB model weights download
-automatically on first start into `./hark-data`.)*
+You can also clone the repo and run `docker compose up -d`. On the first start it downloads about 31 MB of model weights into `./hark-data`.
 
-Then in Home Assistant:
-1. **Settings → Devices & services → Add integration → Wyoming Protocol** → host = the IP of
-   the machine running the container, port **10400**.
-2. **Settings → Voice assistants →** your assistant **→ ⋮ → Add streaming wake word** →
-   **hark** + your phrase.
-3. *(Voice PE / ESPHome devices: set the wake word location from "On device" to "In Home
-   Assistant".)*
+Then add it in Home Assistant under Settings > Devices & services > Add integration > Wyoming Protocol, with the IP of the machine running the container and port 10400. Pick it in your assistant the same way as in step 5 above. If you have a Voice PE or another ESPHome device, switch its wake word setting from "On device" to "In Home Assistant".
 
-### Option 3: Python CLI & API
+### Python
 
-Needs `espeak-ng` and `libsndfile1` (`sudo apt install espeak-ng libsndfile1`).
+You need `espeak-ng` and `libsndfile1` (`sudo apt install espeak-ng libsndfile1`).
 
 ```bash
 pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.5,<3"
 pip install "hark-ww[wyoming,microphone] @ git+https://github.com/pioborgelt/hark.git"
 
-# Test live on your mic with custom German + English phrases at the same time
+# try it live on your microphone, German and English at the same time
 hark listen -p "Okay Haus:de" -p "Hey Jarvis:en"
 
-# Or start the Home Assistant Wyoming server directly
+# or run the Wyoming server for Home Assistant yourself
 wyoming-hark --uri tcp://0.0.0.0:10400 --phrase "Okay Haus:de" --phrase "Hey Jarvis:en"
 ```
 
-<details>
-<summary><b>Python API (6 lines)</b></summary>
+Or from your own code:
 
 ```python
 from hark.streaming import HarkEngine
@@ -90,46 +75,35 @@ stream = engine.create_stream([
 for hit in stream.push(audio_float32_16khz):
     print("Triggered:", hit["phrase"])
 ```
-</details>
 
-> **Quick tip on picking phrases:** 3–4 syllables with clear consonants ("Okay Haus", "Hey Jarvis", "Hallo Computer", "Smart Mirror") work way better than ultra-short words like "Ey" or "Yo" — unless you enjoy talking to your toaster by accident.
+A word on picking phrases: three or four syllables with clear consonants ("Hey Jarvis", "Hallo Computer", "Smart Mirror") work a lot better than tiny words like "Ey" or "Yo". Unless you enjoy talking to your toaster by accident.
 
----
+## Show us the graphs!
 
-## Does it actually work? (Benchmarks)
+Every Hark number here is zero-shot. The model never heard the target word during training, not even as synthetic speech. I typed the phrase in and streamed 25 to 28 hours of speech, music and background noise through it without ever resetting the state.
 
-Every Hark score below is **100% zero-shot**, and the model has never seen audio or synthetic TTS of the target wake word. I just typed the text in and streamed ~25–28 hours of continuous speech, music, and real background noise through it without resetting state.
+### Picovoice wake word benchmark
 
-### 1. Picovoice 24h Wake-Word Benchmark (Loud Background Noise)
-
-Tested across all 6 standard benchmark words (*alexa, computer, jarvis, smart mirror, snowboy, view glass*) mixed with real noise at 10 dB SNR, capped at a strict **0.1 false alarms per hour** (~2 false triggers in 24 hours):
+This is the standard 24 hour benchmark with six words (alexa, computer, jarvis, smart mirror, snowboy, view glass), mixed with real noise at 10 dB SNR. Everything is compared at the same strict limit of 0.1 false alarms per hour, so roughly two false triggers a day.
 
 ![24h Wake-Word Benchmark at 10 dB Noise](docs/charts/wwb_10db_pareto.png)
 
-| Engine | How you add a new word | Languages | Hit Rate (10 dB Noise) | Hit Rate (Clean) |
-|---|---|---|---:|---:|
-| **Hark v0.3 (Open-Source)** | **Type text (instant)** | **EN + DE** | **78.1%** | **91.0%** |
-| Kitt.ai Snowboy | Record voice samples | Any | 68.1% | – |
-| sherpa-onnx (Zipformer 3.3M) | Type text (instant) | EN only | 66.0% | 77.4% |
-| CMU PocketSphinx | Type text | EN | 48.0% | – |
-| Vosk (small) | Type text | EN, DE | 32.7% | – |
-| openWakeWord 0.6 | Hours of TTS training per word | Fixed EN | *63.3% (jarvis) / 0% (computer)* | – |
-| Picovoice Porcupine v4 | Closed-source + Cloud API key | Proprietary | 97.3% | – |
+| Engine | New word | Hit rate at 10 dB |
+|---|---|---:|
+| **Hark v0.3** | type text | **78.1%** |
+| Snowboy | record samples | 68.1% |
+| sherpa-onnx | type text (English only) | 66.0% |
+| PocketSphinx | type text | 48.0% |
+| Vosk (small) | type text | 32.7% |
+| Porcupine v4 | closed source, API key | 97.3% |
 
- **+12 percentage points ahead of sherpa-onnx** (the strongest existing open-source zero-shot engine I could find), winning on 5 out of 6 words.
+On clean audio Hark gets 91.0%. That's 12 points ahead of sherpa-onnx, the best open-source zero-shot engine I could find, and it wins on five of the six words. It also beats the pre-trained openWakeWord models on the two words that exist for both: jarvis (78.4% vs 63.3%) and computer (64.2% vs 0%, where openWakeWord blows past the false alarm limit). Porcupine is still clearly ahead. I'll get there ;)
 
-**Beats pre-trained openWakeWord single-word models zero-shot** on both *jarvis* (78.4% vs 63.3%) and *computer* (64.2% vs 0%, where openWakeWord blows past the false-alarm limit).
+### The test I actually built it for: "Okay PAI"
 
-Closing in on commercial per-word engines without needing an account, API key, or per-device license. (We'll get there ;))
+28 hours of real English speech, German podcasts and music as negatives, then "Okay PAI" and "Hey PAI" spoken clean, in reverberant rooms and over loud music. Fair warning: the positives are synthetic voices, so read this as "does German work at all" rather than "how good is it on your mic". The Picovoice benchmark above is the one with real people.
 
-### 2. The test I actually built it for: "Okay PAI" in English & German
-
-28 hours of real English speech, German podcasts and music as negatives, then "Okay PAI" / "Hey PAI" spoken clean, in reverberant rooms and over loud music. Fair warning: the positives here are **synthetic Piper TTS voices**, so treat this as "does German work at all" rather than "how good is it on your mic" (benchmark #1 above is the real-voice one).
-
-| Language | Hark (0 false alarms in 28 h) | Hark (2 false alarms) | sherpa-onnx | Vosk |
-|---|---:|---:|---:|---:|
-| **English** | **85.9%** | **92.0%** | 81.6% | 48.2% (needs ≥4 FA) |
-| **German** | **57.0%** | **62.8%** *(68.7% @ 5 FA)* | no German support | 5,276+ false alarms (rip) |
+In English Hark catches 85.9% without a single false alarm in 28 hours (92.0% if you allow two), sherpa-onnx gets 81.6%. In German it's 57.0% with zero false alarms and 62.8% with two. sherpa-onnx doesn't do German at all, and Vosk produced over 5,000 false alarms.
 
 German is clearly the weaker language right now. If you have a few real recordings of a German wake word (yours, your kids', your Bavarian uncle's), that's the most useful thing you could send me.
 
@@ -138,30 +112,24 @@ German is clearly the weaker language right now. If you have a few real recordin
   <img src="docs/charts/pai_bench_en_pareto.png" width="49%" alt="English Benchmark" />
 </p>
 
-Full nerd tables and per-word numbers are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
-
----
+All the detailed tables and per-word numbers are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## How it works
 
-Normal streaming wake-word models only look *backwards* in time so they stay fast. The catch: in a noisy room, "he collects a..." sounds identical to "Alexa" until you hear the syllable *after* it.
+Normal streaming wake word models only look backwards in time so they stay fast. The catch: in a noisy room, "he collects a..." sounds exactly like "Alexa" until you hear the syllable after it.
 
-Hark splits the job into two tiny models ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)):
+So Hark splits the job into two small models (details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)):
 
-1. **Text → Phonemes:** `espeak-ng` turns your text into IPA phonemes (plus common US/UK/German pronunciation variants so you don't have to speak like a news anchor).
-2. **Stage 1 — The Bouncer (8.7 MB, runs 24/7):** A tiny causal Conv-GRU scans incoming audio 25x faster than real-time on CPU (~4% load). Most of the hour, Stage 2 stays completely asleep.
-3. **Stage 2 — The Double-Checker (22 MB, <2 ms per check):** When Stage 1 thinks it heard your phrase, Hark waits 0.3 seconds of extra context and runs a bidirectional phoneme cross-attention model forward *and* backward over that 2-second snippet. That kills >95% of look-alike false alarms for basically zero extra CPU.
+1. eSpeak turns your text into phonemes, plus the usual US, UK and German pronunciation variants, so you don't have to talk like a news anchor.
+2. The first model (8.7 MB) runs all the time. It's a small causal Conv-GRU that listens for the phonemes of your phrase and costs almost nothing on a CPU. Most of the time the second model is asleep.
+3. When the first model thinks it heard your phrase, Hark waits another 0.3 seconds and lets the second model (22 MB) look at the whole snippet, forwards and backwards. That throws out most of the look-alikes.
 
----
+## Alpha heads-up and feedback
 
-## Alpha Heads-Up & Feedback
+This is a really early alpha release and for now only English and German are supported. I mainly want to find out where it breaks on real microphones, weird room acoustics, and regional accents before polishing v0.4. Also, I'm building this in my free time, so keep your expectations relaxed: this isn't Porcupine (for now...).
 
-This is a really early alpha release. I mainly want to find out where it breaks on real microphones, weird room acoustics, and regional accents before polishing v0.4. Also, I'm building this in my free time, so keep your expectations relaxed: this isn't Porcupine (for now...).
-
-- Runs on your Home Assistant server / Pi CPU (like `wyoming-openwakeword`), for now NOT directly on an ESP32 chip.
-- If a phrase feels deaf or false-triggers when your washing machine beeps, check the container logs (Hark logs near-misses rejected by Stage 2) and [open an issue](https://github.com/pioborgelt/hark/issues/new) with your **phrase**, **language**, and **mic setup**.
+It runs on your Home Assistant server or Pi, like openWakeWord does, and not directly on an ESP32 for now. If a phrase feels deaf, or it goes off whenever your washing machine beeps, have a look at the logs (Hark logs every near miss its second stage rejects) and [open an issue](https://github.com/pioborgelt/hark/issues/new) with your phrase, the language and your mic setup.
 
 ## License
 
-- **Code:** [MIT](LICENSE)
-- **v0.3-alpha Weights** ([Hugging Face](https://huggingface.co/Pioborgelt/hark)): **CC-BY-NC-4.0** (free for personal use, Home Assistant setups, tinkering, and research). Trained on open speech/noise datasets (MLS, LibriSpeech, VoxPopuli, Common Voice, MUSAN) + synthetic speech generated with Google Gemini TTS.
+The code is [MIT](LICENSE). The v0.3 alpha weights ([on Hugging Face](https://huggingface.co/Pioborgelt/hark)) are CC BY-NC 4.0, so they're free for personal use, Home Assistant setups, tinkering and research. They were trained on open speech and noise datasets (MLS, LibriSpeech, VoxPopuli, Common Voice, MUSAN) plus synthetic speech generated with Google Gemini TTS.

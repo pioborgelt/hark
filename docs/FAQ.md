@@ -1,280 +1,177 @@
 # Hark FAQ
 
-Everything we stumbled over while setting Hark up in fresh Home Assistant installs, in English
-and German, so you don't have to. Menu names are from Home Assistant 2026.11; German UI terms are
-in brackets.
+I set Hark up in a bunch of fresh Home Assistant installs, in English and in German, and wrote down everything that tripped me up. Menu names are from Home Assistant 2026.11. If your Home Assistant is in German, I put the German names in brackets.
 
-**Jump to:** [Setup](#setup) · [It doesn't hear me](#it-doesnt-hear-me) ·
-[It hears too much](#it-hears-too-much) · [Phrases](#phrases) · [Updates](#updates) ·
-[Devices & satellites](#devices--satellites) · [Docker](#docker-without-home-assistant-os) ·
-[Privacy & resources](#privacy--resources)
-
----
+- [Setup](#setup)
+- [It doesn't hear me](#it-doesnt-hear-me)
+- [It hears too much](#it-hears-too-much)
+- [Phrases](#phrases)
+- [Updates](#updates)
+- [Devices and satellites](#devices-and-satellites)
+- [Docker](#docker)
+- [Privacy and resources](#privacy-and-resources)
 
 ## Setup
 
-### Where do I install it? There is no "Add-ons" menu.
+### There is no "Add-ons" menu. Where do I install it?
 
-Home Assistant now calls add-ons **Apps**:
+Home Assistant renamed add-ons to "Apps" a while ago. Go to Settings > Apps and click "Install app" in the bottom right. In the app store, open the three-dot menu in the top right, choose "Repositories" and add `https://github.com/pioborgelt/hark`. In German that's Einstellungen > Apps > "App installieren", then "Repositorys".
 
-**Settings → Apps → Install app** (button, bottom right) **→ App store → ⋮ (top right) →
-Repositories → Add**, then paste `https://github.com/pioborgelt/hark`.
+Hark ends up somewhere further down the store list, so just type "hark" into the search.
 
-> 🇩🇪 Einstellungen → Apps → **App installieren** → App-Store → ⋮ → **Repositorys** →
-> **Hinzufügen**
+### It's installed and running. Now what?
 
-Hark is further down the store list; type `hark` into the search field.
+Hark only gives you the wake word. Home Assistant needs three more things before anything happens:
 
-### I installed and started it. Now what?
+1. Your assistant needs speech-to-text and text-to-speech, for example the Whisper (or Speech-to-Phrase) and Piper apps. This one is sneaky: without speech-to-text, Home Assistant quietly refuses to run the assistant at all, so Hark never gets any audio and you don't see an error anywhere.
+2. Add the Wyoming connection: Settings > Devices & services, then under "Discovered" (Entdeckt) click Add on Hark Wake Word.
+3. Turn on the wake word in your assistant. That option is hidden: open Settings > Voice assistants, click your assistant, open the three-dot menu in the top right of that dialog and choose "Add streaming wake word" (Streaming-Aktivierungswort hinzufügen). Then pick hark as the engine and your phrase as the wake word.
 
-Hark only provides the wake word. Home Assistant needs three more things:
+### Do I have to remove openWakeWord first?
 
-1. **Speech-to-text and text-to-speech** in your assistant, e.g. the **Whisper** (or
-   **Speech-to-Phrase**) and **Piper** apps. *Without speech-to-text Home Assistant silently
-   refuses to run the assistant and Hark never receives audio.*
-2. **The Wyoming connection:** **Settings → Devices & services → Discovered → Hark Wake Word →
-   Add** (🇩🇪 Geräte & Dienste → **Entdeckt**).
-3. **The wake word in your assistant**, which is hidden by default: **Settings → Voice
-   assistants → your assistant → ⋮ (top right of the dialog) → Add streaming wake word**, then
-   *Wake word engine* = **hark** and *Wake word* = your phrase.
-   > 🇩🇪 Sprachassistenten → Assistent → ⋮ → **Streaming-Aktivierungswort hinzufügen** →
-   > *Aktivierungswort-Modul* = hark, *Aktivierungswort* = deine Phrase.
-
-### Why is it called "Aktivierungswort" in German?
-
-That is Home Assistant's German word for wake word. Hark's options say "Aktivierungswörter
-(Wake-Words)" so you can find both.
-
-### Do I need openWakeWord removed first?
-
-No. Both can run side by side; each assistant picks one engine. Neither opens a host port by
-default, so they don't clash.
-
----
+No, both can run side by side. Each assistant uses one of them, and neither opens a port on your host, so they don't get in each other's way.
 
 ## It doesn't hear me
 
-Open the Hark app → **Log** (🇩🇪 Protokoll) and check which line you see.
+Open the Hark app and look at the Log tab (Protokoll). What you see there tells you where it's stuck:
 
-| Log shows | Meaning | Fix |
-| --- | --- | --- |
-| Nothing after `listening on tcp://…` | Home Assistant is not sending audio to Hark. | See the next questions. |
-| `Audio stream started, listening for: "…"` | Audio arrives, Hark listens for that phrase. | If it's the wrong phrase, see [*It listens for the wrong phrase*](#it-listens-for-the-wrong-phrase). |
-| `Listening: … peak level -60 dBFS` / `nearly silent` | The microphone is muted or very quiet. | Check the satellite's microphone / mute switch. |
-| `Near-miss rejected by Stage-2 … combined=0.12 < 0.15` | Almost recognized. | Try `sensitivity: sensitive`, speak the phrase as configured, or pick a longer phrase. |
-| `DETECTED: …` but nothing happens | Hark did its job; the rest of the pipeline failed. | Check speech-to-text (below). |
+- **Nothing after `listening on tcp://...`**: Home Assistant isn't sending any audio to Hark. The next question is for you.
+- **`Audio stream started, listening for: "..."`**: audio arrives and Hark is listening for that phrase. If it's the wrong one, see [It listens for the wrong phrase](#it-listens-for-the-wrong-phrase).
+- **`Listening: ... peak level -60 dBFS` or `nearly silent`**: the microphone is muted or extremely quiet. Check the mute switch on your satellite.
+- **`Near-miss rejected by Stage-2 ... combined=0.12 < 0.15`**: that one was close. Try the `sensitive` setting, say the phrase the way you typed it, or pick a longer phrase.
+- **`DETECTED: ...` but nothing happens**: Hark did its part, something later in the pipeline failed. Usually that's speech-to-text, see below.
 
-### The log never shows "Audio stream started"
+### The log never says "Audio stream started"
 
-In order of likelihood:
+The usual suspects, most likely first:
 
-1. **The assistant has no speech-to-text.** Home Assistant aborts before the wake word stage
-   (`the pipeline does not support speech-to-text`) and shows no error in the UI.
-2. **The satellite uses a different assistant.** Every satellite has its own **Assistant**
-   setting (**Settings → Devices & services → your satellite**). It does *not* follow the
-   "preferred" assistant.
-3. **The satellite went silent** after a restart, an update or a failed command, see below.
+1. The assistant has no speech-to-text. Home Assistant gives up before it even gets to the wake word and doesn't tell you in the UI.
+2. Your satellite uses a different assistant. Every satellite has its own assistant setting (Settings > Devices & services > your satellite), and it does not follow the "preferred" assistant.
+3. The satellite went silent after a restart, an update or a failed command. That's the next question.
 
 ### My satellite stops listening after a reboot, an update or a failed command
 
-This is a Home Assistant behaviour with Linux satellites (`wyoming-satellite`): if one
-assistant run fails, for example because an app is still starting after a reboot, Home
-Assistant does not start a new one and the satellite stays silent until it is reloaded. It also
-happens after "No text recognized" or after Hark restarts or updates.
+This is how Home Assistant behaves with Linux satellites (`wyoming-satellite`). If one assistant run fails, say because an app is still starting after a reboot, Home Assistant doesn't start a new one, and the satellite stays quiet until you reload it. The same happens after "No text recognized" and whenever Hark restarts or updates.
 
-- **Quick fix:** **Settings → Devices & services → Wyoming Protocol → ⋮ next to the satellite
-  → Reload** (🇩🇪 Neu laden).
-- **Permanent fix:** an automation that reloads it after every start (tested on HA 2026.11):
+The quick fix is to reload the satellite: Settings > Devices & services > Wyoming Protocol, then the three-dot menu next to the satellite and "Reload" (Neu laden).
 
-  ```yaml
-  alias: Reload voice satellites after start
-  triggers:
-    - trigger: homeassistant
-      event: start
-  actions:
-    - delay:
-        seconds: 90   # give Whisper/Piper/Hark time to start
-    - action: homeassistant.reload_config_entry
-      target:
-        entity_id: assist_satellite.living_room   # your satellite
-  mode: single
-  ```
+To never think about it again, use an automation that reloads it after every start. I tested this one on HA 2026.11:
 
-Hark itself starts before Home Assistant Core, so it is ready when satellites connect; the
-Whisper app starts later, which is why the reboot case still needs the automation. We have
-not tested ESPHome devices (Voice PE) yet; please report whether they recover on their own.
+```yaml
+alias: Reload voice satellites after start
+triggers:
+  - trigger: homeassistant
+    event: start
+actions:
+  - delay:
+      seconds: 90   # give Whisper, Piper and Hark time to start
+  - action: homeassistant.reload_config_entry
+    target:
+      entity_id: assist_satellite.living_room   # your satellite
+mode: single
+```
 
-### The first word of my command is missing ("…time is it?")
+Hark starts before Home Assistant itself, so it's ready when satellites connect. The Whisper app starts later though, which is why you still need the automation after a reboot. I haven't tried ESPHome devices like the Voice PE yet. If you have one, I'd love to know whether it recovers on its own.
 
-Hark confirms a wake word about 0.3 s *after* you finish it: its second stage listens to a bit
-of audio after the phrase to reject look-alikes. Home Assistant only passes audio from that
-moment on to speech-to-text. **Pause briefly after the wake word**, or wait for the satellite's
-chime, then speak.
+### The first word of my command is missing ("...time is it?")
 
-### Speech-to-text understands nonsense in German
+Hark confirms the wake word about 0.3 seconds after you finish saying it, because the second stage listens to a little bit of audio after the phrase to rule out look-alikes. Home Assistant only hands audio from that point on to speech-to-text. So pause briefly after the wake word, or wait for the satellite's chime, and then talk.
 
-The Whisper app defaults to `language: en` and a small model. In the Whisper app's
-configuration set **Language** to `de` and, if your hardware allows it, a bigger model
-(e.g. `small-int8`). Also set the assistant's speech-to-text language to German.
 
 ### It listens for the wrong phrase
 
-Home Assistant uses exactly **one** wake word per assistant, preselected to the first phrase in
-the list. Choose the phrase in the assistant (see [Setup](#setup)), and make sure the satellite
-uses that assistant. Create a second assistant for a second phrase.
-
----
+Home Assistant uses exactly one wake word per assistant, and it preselects the first phrase in the list. Pick your phrase in the assistant (see [Setup](#setup)) and make sure the satellite uses that assistant. For a second phrase, create a second assistant.
 
 ## It hears too much
 
-### It triggers on normal speech
+### It goes off during normal conversation
 
-Short, common phrases can appear inside normal sentences. In our tests "Okay Haus" triggered on
-*"Okay, das Haus da drüben ist ziemlich groß"* with `balanced`, but not with `strict`.
+Set the sensitivity to `strict`, and prefer phrases with three or four syllables that nobody says in passing ("Hallo Kühlschrank", "Hey Jarvis") over something like "Okay Haus". If you turn on "Log near misses", the log shows you how close each false trigger was.
 
-- Set **sensitivity** to `strict`.
-- Prefer 3–4 syllables that don't occur in everyday sentences ("Hallo Kühlschrank",
-  "Hey Jarvis") over "Okay Haus".
-- Turn on **Log near misses**; the scores show how close each false trigger was.
+### What do strict, balanced and sensitive actually do?
 
-### What do strict / balanced / sensitive mean in numbers?
-
-They set the score threshold: `strict` 0.85, `balanced` 0.15, `sensitive` −0.45 (one-syllable
-very short phrases (5 sounds or fewer) get a stricter threshold automatically). Near-miss log lines show the score next to the
-threshold, e.g. `combined=0.84 < 0.85`.
-
----
+They move the score threshold: 0.85 for `strict`, 0.15 for `balanced` and -0.45 for `sensitive`. Very short phrases (five sounds or fewer) automatically get a stricter threshold. The near-miss lines in the log show the score next to the threshold, like `combined=0.84 < 0.85`.
 
 ## Phrases
 
-### What format do phrases need?
+### How do I write a phrase?
 
-`Text:de` or `Text:en`, e.g. `Hallo Kühlschrank:de`, `Hey Jarvis:en`. The language decides
-the pronunciation: `Hallo Haus:en` is pronounced as English "Hallo House" and works poorly for
-German speakers.
+The text, a colon and the language: `Hallo Kühlschrank:de` or `Hey Jarvis:en`. The language decides how it's pronounced. `Hallo Haus:en` gets pronounced like English "Hallo House", which won't work well if you say it in German.
 
 ### Saving fails with "does not match regular expression ^.+:(de|en)$"
 
-A phrase is missing `:de` or `:en` (🇩🇪 *Speichern fehlgeschlagen*). Add it and save again.
+One of your phrases is missing the `:de` or `:en` at the end. Add it and save again.
 
 ### Which phrases work best?
 
-3–4 syllables with clear consonants: "Hallo Kühlschrank", "Hey Jarvis", "Okay Computer",
-"Hallo Computer". Avoid single short words ("Hey", "Computer") and phrases that occur in normal
-speech.
+Three or four syllables with clear consonants, like "Hallo Kühlschrank", "Hey Jarvis", "Okay Computer" or "Hallo Computer". Single short words ("Hey", "Computer") and phrases you'd say in normal conversation work worse.
 
 ### Can I use other languages, umlauts or numbers?
 
-Umlauts and `ß` are fine, and digits are read out ("Computer 3000"). Other languages and
-scripts (French, Cyrillic, Chinese, emoji) are rejected with an error in the log, because the
-model only knows German and English sounds.
+Umlauts and ß are fine, and numbers get read out ("Computer 3000"). Other languages and alphabets (French, Cyrillic, Chinese, emoji) are rejected with an error in the log. The model only knows German and English sounds.
 
-### I added a phrase but it isn't in the assistant's list
+### I added a phrase but it's not in the assistant's list
 
-Restart the Hark app after saving, then reload the *Hark Wake Word*
-entry under **Settings → Devices & services → Wyoming Protocol → ⋮ → Reload**.
-
----
+Restart the Hark app after saving. Then reload the Hark Wake Word entry under Settings > Devices & services > Wyoming Protocol (three-dot menu, "Reload").
 
 ## Updates
 
-### "Update available" is shown but there is no update button
+### It says "Update available" but there's no update button
 
-Home Assistant creates the update button for an app when its *Supervisor* integration starts.
-Right after the first install it's missing. Restart Home Assistant once (**Settings → ⋮ →
-Restart Home Assistant**) or reload **Settings → Devices & services → Home Assistant
-Supervisor**. Afterwards updates appear on the app page and under **Settings**. **Rebuild**
-(🇩🇪 Neu aufbauen) does not install a newer version.
+Home Assistant only creates the update button for an app when its Supervisor integration starts, so right after the first install it's missing. Restart Home Assistant once (Settings, three-dot menu, "Restart Home Assistant") or reload the Home Assistant Supervisor entry under Settings > Devices & services. After that, updates show up on the app page and under Settings. "Rebuild" (Neu aufbauen) won't install a newer version, by the way.
 
-### After updating, nothing reacts
+### After the update nothing reacts anymore
 
-Updating restarts Hark, and Linux satellites go silent until reloaded, see
-[My satellite stops listening](#my-satellite-stops-listening-after-a-reboot-an-update-or-a-failed-command).
+The update restarts Hark, and Linux satellites go quiet until you reload them. See [My satellite stops listening](#my-satellite-stops-listening-after-a-reboot-an-update-or-a-failed-command).
 
----
+## Devices and satellites
 
-## Devices & satellites
+### Does Hark run on my ESP32 or Voice PE?
 
-### Does Hark run on my ESP32 / Voice PE?
-
-No, Hark runs on the Home Assistant machine. The device streams audio to Home Assistant:
-
-- **Home Assistant Voice PE / ESPHome:** set the wake word location to **In Home Assistant**
-  instead of *On device*.
-- **wyoming-satellite** (Raspberry Pi, Linux PC): run it without a local wake word service.
+No, Hark runs on your Home Assistant machine and the device streams its audio there. On a Home Assistant Voice PE or another ESPHome device, set the wake word location to "In Home Assistant" instead of "On device". If you use `wyoming-satellite` on a Raspberry Pi or Linux PC, run it without a local wake word service.
 
 ### Can I use several phrases at once?
 
-Hark can listen for all configured phrases, but Home Assistant asks for one phrase per
-assistant. Use one assistant per phrase and assign them to different satellites.
+Hark can listen for all of them, but Home Assistant asks for one phrase per assistant. So make one assistant per phrase and give them to different satellites.
 
----
+## Docker
 
-## Docker (without Home Assistant OS)
+### What host do I enter in the Wyoming dialog?
 
-### Which host do I enter in the Wyoming dialog?
+The IP address of the machine running the container, and port `10400`. You find the dialog under Settings > Devices & services > Add integration > Wyoming Protocol. `localhost` only works if Home Assistant itself runs in Docker with `network_mode: host` on the same machine. On Home Assistant OS, `localhost` is Home Assistant and not your Docker host, so you'll get "Failed to connect" (Verbindung fehlgeschlagen).
 
-The IP address of the machine running the Hark container, and port `10400`
-(**Settings → Devices & services → Add integration → Wyoming Protocol**; 🇩🇪 *Integration
-hinzufügen*). `localhost` only works if Home Assistant itself runs in Docker with
-`network_mode: host` on the same machine. On Home Assistant OS, `localhost` is Home Assistant,
-not your Docker host, and you get **"Failed to connect"** (🇩🇪 *Verbindung fehlgeschlagen*).
+One more thing about that dialog that caught me: the port is prefilled with 0, so change it to 10400.
 
-Two things that trip people up in that dialog:
+### The container runs, but Home Assistant can't connect
 
-- The **port is prefilled with 0**. Change it to `10400`.
-- **After an error, Home Assistant clears both fields.** Enter host *and* port again before
-  retrying.
-
-### The container started, but Home Assistant can't connect
-
-- `docker logs wyoming-hark` must end with `listening on tcp://0.0.0.0:10400`. The first
-  start downloads ~31 MB of model weights; until then the port is closed.
-- The port must be published (`-p 10400:10400`) and not blocked by a firewall.
-- Log timestamps inside the container are UTC.
+Check `docker logs wyoming-hark`. It should end with `listening on tcp://0.0.0.0:10400`. On the very first start Hark downloads about 31 MB of model weights, and the port only opens after that. Also make sure the port is published (`-p 10400:10400`) and no firewall is in the way. Small thing: the timestamps in the container log are UTC.
 
 ### Where are the weights, debug clips and settings?
 
-Everything lives in the mounted `/data` volume (`./hark-data` in the examples): weights in
-`models/`, debug clips (if `HARK_DEBUG_CLIP_DIR=/data/debug_clips` is set) in
-`debug_clips/`. Weights are checked against pinned SHA256 hashes on every start.
+Everything is in the `/data` volume (`./hark-data` in the examples). The weights are in `models/` and get checked against their known checksums on every start. Debug clips land in `debug_clips/` if you set `HARK_DEBUG_CLIP_DIR=/data/debug_clips`.
 
-### How do I change phrases?
+### How do I change the phrases?
 
-Edit `HARK_PHRASES` (separated by `;`), recreate the container, then reload the *hark* entry in
-**Settings → Devices & services → Wyoming Protocol** so Home Assistant picks up the new list.
-Phrases with an unsupported language or characters are skipped with an error in the log.
+Change `HARK_PHRASES` (separated by `;`), recreate the container, and then reload the hark entry under Settings > Devices & services > Wyoming Protocol so Home Assistant sees the new list. Phrases in an unsupported language or with odd characters are skipped with an error in the log.
 
 ### After restarting the container nothing reacts
 
-Same as the app: Linux satellites go silent until reloaded, see
-[My satellite stops listening](#my-satellite-stops-listening-after-a-reboot-an-update-or-a-failed-command).
+Same story as with the app: Linux satellites go quiet until you reload them. See [My satellite stops listening](#my-satellite-stops-listening-after-a-reboot-an-update-or-a-failed-command).
 
----
+## Privacy and resources
 
-## Privacy & resources
+### Does Hark record or upload anything?
 
-### Does Hark record or upload audio?
+No, everything stays on your machine. Nothing gets saved unless you turn on "Save debug clips", which keeps the last 30 three-second clips in `/data/debug_clips` for troubleshooting. Keep in mind that satellites using wake word detection in Home Assistant stream their microphone to your Home Assistant all the time. That's how it works with any engine that runs there.
 
-No. Everything runs locally. Nothing is stored unless you turn on **Save debug clips**, which
-keeps the last 30 three-second clips in `/data/debug_clips` for troubleshooting. Satellites
-that use Home Assistant wake word detection stream microphone audio to your Home Assistant
-continuously.
+### How well does it work inside Home Assistant?
 
-### How well does it work in Home Assistant?
-
-In our end-to-end tests through a real Home Assistant pipeline with recordings of real people
-(Picovoice wake word benchmark): "Jarvis" 8/8, "Computer" 6/8, no false triggers on other
-speech. Synthetic German voices: "Hallo Kühlschrank" and "Okay Haus" were recognized; a very
-low-quality voice was missed. Your microphone and room matter more than anything else, so
-watch the near-miss lines in the log.
+I ran recordings of real people from the Picovoice benchmark through a real Home Assistant pipeline. "Jarvis" was recognized 8 out of 8 times and "Computer" 6 out of 8, with no false triggers on the other speech. With synthetic German voices, "Hallo Kühlschrank" and "Okay Haus" worked, and one very low-quality voice got missed. In practice your microphone and your room matter more than anything else, so keep an eye on the near-miss lines in the log.
 
 ### How much CPU and RAM does it need?
 
-In our x86 test VM: about 390 MB RAM and close to 0 % CPU while idle. Raspberry Pi numbers are
-not measured yet. Please report yours.
+In my x86 test VM it used about 390 MB of RAM and almost no CPU while idle. I haven't measured a Raspberry Pi yet. If you run it on one, please tell me how it goes.
 
-### Is it hard to install?
+### How long does the install take?
 
-About 1.5 minutes on a fast x86 machine (it downloads PyTorch); considerably longer on a
-Raspberry Pi. The install button only shows a spinner meanwhile.
+About a minute and a half on a fast x86 machine, mostly for downloading PyTorch. On a Raspberry Pi it takes a good while longer. Home Assistant only shows a spinner during that time, so be patient.
