@@ -34,9 +34,10 @@ The app doesn't open a port on your host, so it happily runs next to openWakeWor
 Start the Wyoming server with whatever English or German phrases you like, separated by `;`:
 
 ```bash
+mkdir -p hark-data
 docker run -d --name wyoming-hark --restart unless-stopped \
   -p 10400:10400 \
-  -v ./hark-data:/data \
+  -v "$PWD/hark-data:/data" \
   -e HARK_PHRASES="Hallo Kühlschrank:de;Hey Jarvis:en" \
   -e HARK_SENSITIVITY="balanced" \
   ghcr.io/pioborgelt/hark:alpha
@@ -48,7 +49,7 @@ Then add it in Home Assistant under Settings > Devices & services > Add integrat
 
 ### Python
 
-You need `espeak-ng` and `libsndfile1` (`sudo apt install espeak-ng libsndfile1`).
+No system packages needed: on Linux (x86_64 and ARM64) the pip packages bring eSpeak NG and libsndfile along.
 
 ```bash
 pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.5,<3"
