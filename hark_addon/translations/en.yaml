@@ -2,7 +2,7 @@ configuration:
   phrases:
     name: Wake phrases
     description: >-
-      One phrase per entry, ending in :de (German) or :en (English), e.g. "Okay Haus:de" or
+      One phrase per entry, ending in :de (German) or :en (English), e.g. "Hallo Computer:de" or
       "Hey Jarvis:en". Add a phrase, then pick it in your voice assistant.
   sensitivity:
     name: Sensitivity

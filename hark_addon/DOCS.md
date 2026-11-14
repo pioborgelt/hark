@@ -14,7 +14,7 @@ You also need a device that streams its microphone to Home Assistant (a "satelli
 
 ## Setup
 
-1. On the Configuration tab, add your wake phrases. Each one ends with `:de` or `:en`, like `Okay Haus:de` or `Hey Jarvis:en`. Press Enter after each phrase, then Save.
+1. On the Configuration tab, add your wake phrases. Each one ends with `:de` or `:en`, like `Hallo Computer:de` or `Hey Jarvis:en`. Press Enter after each phrase, then Save.
 2. Start the app on the Info tab. The first start takes a moment. Afterwards the Log tab lists each phrase with its pronunciation.
 3. Go to Settings > Devices & services (Geräte & Dienste). Under "Discovered" (Entdeckt) you'll see Hark Wake Word. Click Add, then Submit.
 4. Open Settings > Voice assistants (Sprachassistenten) and click your assistant. The wake word setting is hidden in the three-dot menu in the top right of that dialog: "Add streaming wake word" (Streaming-Aktivierungswort hinzufügen). Choose hark as the engine and your phrase as the wake word, then Update.

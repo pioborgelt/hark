@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5-alpha
+
+- Installs a ready-made image instead of building it on your device, so installing and updating
+  takes seconds to minutes instead of a long build (especially on a Raspberry Pi).
+- The default wake phrase is now just "Hey Jarvis:en". Add your own phrases on the
+  Configuration tab.
+
 ## 0.3.4-alpha
 
 - Starts before Home Assistant Core (`startup: services`), so satellites find the wake word

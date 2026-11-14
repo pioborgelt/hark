@@ -1,6 +1,8 @@
 name: "Hark Wake Word"
 description: "Type any English or German wake phrase as text — zero audio samples or training required."
-version: "0.3.4-alpha"
+version: "0.3.5-alpha"
+# Prebuilt per-architecture images (built by .github/workflows/addon.yml); nothing is built on the device.
+image: "ghcr.io/pioborgelt/{arch}-hark-addon"
 slug: "hark_wakeword"
 url: "https://github.com/pioborgelt/hark"
 init: false
@@ -22,7 +24,6 @@ ports_description:
   10400/tcp: "Wyoming Protocol (only needed for satellites/clients outside Home Assistant)"
 options:
   phrases:
-    - "Okay Haus:de"
     - "Hey Jarvis:en"
   sensitivity: "balanced"
   threads: 2

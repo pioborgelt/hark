@@ -3,7 +3,7 @@ configuration:
     name: Aktivierungswörter (Wake-Words)
     description: >-
       Eine Phrase pro Eintrag, mit :de (Deutsch) oder :en (Englisch) am Ende, z. B.
-      "Okay Haus:de" oder "Hey Jarvis:en". Danach unter Einstellungen → Sprachassistenten als Aktivierungswort auswählen.
+      "Hallo Computer:de" oder "Hey Jarvis:en". Danach unter Einstellungen → Sprachassistenten als Aktivierungswort auswählen.
   sensitivity:
     name: Empfindlichkeit
     description: >-
