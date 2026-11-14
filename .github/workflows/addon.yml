@@ -1,0 +1,87 @@
+name: Home Assistant app image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["hark_addon/**"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.arch }}-hark-addon
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read app version
+        id: version
+        run: |
+          echo "version=$(sed -n 's/^version: *"\(.*\)"/\1/p' hark_addon/config.yaml)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: hark_addon
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          labels: |
+            io.hass.name=Hark Wake Word
+            io.hass.type=addon
+            io.hass.arch=${{ matrix.arch }}
+            io.hass.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+      - name: Smoke test (start, describe, speed)
+        run: |
+          mkdir -p data
+          echo '{"phrases":["Hey Jarvis:en"],"sensitivity":"balanced","threads":2,"log_near_misses":true,"save_debug_clips":false}' > data/options.json
+          docker run -d --name app -v "$PWD/data:/data" "$IMAGE:${{ steps.version.outputs.version }}"
+          for i in $(seq 1 90); do docker logs app 2>&1 | grep -q "listening on" && break; sleep 2; done
+          docker logs app 2>&1 | tail -n 5
+          docker logs app 2>&1 | grep -q "listening on"
+          docker exec -i app python - <<'PY'
+          import asyncio, time
+          import numpy as np
+          from wyoming.client import AsyncTcpClient
+          from wyoming.info import Describe, Info
+          from hark.streaming import HarkEngine
+
+          async def describe():
+              async with AsyncTcpClient("127.0.0.1", 10400) as c:
+                  await c.write_event(Describe().event())
+                  info = Info.from_event(await c.read_event())
+                  print("models:", [m.description for m in info.wake[0].models])
+          asyncio.run(describe())
+
+          engine = HarkEngine(threads=2)
+          stream = engine.create_stream([engine.enroll("Hey Jarvis", language="en")])
+          audio = (np.random.default_rng(0).standard_normal(16000 * 60) * 0.05).astype("float32")
+          t = time.perf_counter()
+          for i in range(0, len(audio), 1024):
+              stream.push(audio[i:i + 1024])
+          dt = time.perf_counter() - t
+          print(f"60 s of audio in {dt:.2f} s (real-time factor {dt / 60:.3f})")
+          PY
+          docker rm -f app
+      - name: Push
+        run: docker push "$IMAGE:${{ steps.version.outputs.version }}"
