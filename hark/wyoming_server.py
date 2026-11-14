@@ -10,6 +10,7 @@ import time
 from functools import partial
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 from wyoming.audio import AudioChunk, AudioChunkConverter, AudioStart, AudioStop
 from wyoming.event import Event
@@ -18,9 +19,11 @@ from wyoming.server import AsyncEventHandler, AsyncServer
 from wyoming.wake import Detect, Detection, NotDetected
 
 from .audio import RATE
-from .streaming import EnrolledPhrase, HarkEngine, HarkStream, parse_phrase_list, parse_phrase_spec
+from .streaming import EnrolledPhrase, HarkEngine, HarkStream, parse_phrase_spec, split_phrase_specs
 
 LOGGER = logging.getLogger("wyoming_hark")
+STATUS_INTERVAL_SECONDS = 60.0
+QUIET_PEAK_DBFS = -50.0
 VERSION = "0.3.0-alpha"
 
 
@@ -34,6 +37,7 @@ class HarkWyomingState:
         log_near_misses: bool = True,
         debug_clip_dir: Path | None = None,
         max_debug_clips: int = 30,
+        max_dynamic_phrases: int = 8,
     ):
         self.engine = engine
         self.phrases: dict[str, EnrolledPhrase] = {p.name: p for p in phrases}
@@ -42,6 +46,8 @@ class HarkWyomingState:
         self.log_near_misses = log_near_misses
         self.debug_clip_dir = debug_clip_dir
         self.max_debug_clips = max_debug_clips
+        self.max_dynamic_phrases = max_dynamic_phrases
+        self.dynamic_enrollments = 0
         self.lock = asyncio.Lock()
         if self.debug_clip_dir is not None:
             self.debug_clip_dir.mkdir(parents=True, exist_ok=True)
@@ -54,7 +60,9 @@ class HarkWyomingState:
         models = [
             WakeModel(
                 name=p.name,
-                description=f'Zero-shot {p.language.upper()} wake phrase "{p.phrase}" (IPA: /{p.ipa_variants[0]}/)',
+                # Home Assistant shows the description as the wake word name; keep it short.
+                # The IPA pronunciation is logged at enrollment instead.
+                description=f"{p.phrase} ({p.language.upper()})",
                 phrase=p.phrase,
                 attribution=attribution,
                 installed=True,
@@ -91,17 +99,33 @@ class HarkWyomingState:
             if by_phrase is not None:
                 resolved.append(by_phrase)
                 continue
-            # Support dynamic zero-shot enrollment directly from Detect(names=["Okay Küche:de"])
-            phrase_txt, lang = parse_phrase_spec(req, default_language="en")
-            enrolled = self.engine.enroll(
-                phrase_txt,
-                language=lang,
-                name=req if ":" not in req else None,
-                sensitivity=self.sensitivity,
-                threshold_override=self.threshold_override,
-            )
+            # Support dynamic zero-shot enrollment directly from Detect(names=["Okay Küche:de"]).
+            # Any network client can send names, so cap how many extra phrases it may add.
+            if self.dynamic_enrollments >= self.max_dynamic_phrases:
+                LOGGER.warning(
+                    'Ignoring unknown wake word "%s": dynamic enrollment limit (%d) reached',
+                    req,
+                    self.max_dynamic_phrases,
+                )
+                continue
+            try:
+                phrase_txt, lang = parse_phrase_spec(req, default_language="en")
+                enrolled = self.engine.enroll(
+                    phrase_txt,
+                    language=lang,
+                    name=req if ":" not in req else None,
+                    sensitivity=self.sensitivity,
+                    threshold_override=self.threshold_override,
+                )
+            except (KeyError, ValueError) as exc:
+                LOGGER.warning('Cannot enroll requested wake word "%s": %s', req, exc)
+                continue
+            self.dynamic_enrollments += 1
             self.phrases[enrolled.name] = enrolled
             resolved.append(enrolled)
+        if not resolved:
+            LOGGER.warning("None of the requested wake words %s are available; using all configured", names)
+            return list(self.phrases.values())
         return resolved
 
     def save_debug_clip(self, kind: str, audio_ring, meta: dict) -> None:
@@ -129,6 +153,46 @@ class HarkEventHandler(AsyncEventHandler):
         self.stream: HarkStream | None = None
         self.active_names: list[str] | None = None
         self.detected_in_utterance = False
+        self._reset_stats()
+
+    def _reset_stats(self) -> None:
+        self.audio_samples = 0
+        self.report_samples = 0
+        self.report_peak = 0
+        self.detections_total = 0
+
+    def _track_audio(self, pcm: bytes) -> None:
+        """Log that audio arrives and how loud it is, so users can tell a silent pipeline apart."""
+        samples = np.frombuffer(pcm, dtype="<i2")
+        if samples.size == 0:
+            return
+        self.audio_samples += samples.size
+        self.report_samples += samples.size
+        self.report_peak = max(self.report_peak, int(np.abs(samples.astype(np.int32)).max()))
+        if self.report_samples < STATUS_INTERVAL_SECONDS * RATE:
+            return
+        peak_dbfs = 20.0 * np.log10(max(self.report_peak, 1) / 32768.0)
+        LOGGER.info(
+            "Listening: %.0f s audio received, peak level %.1f dBFS in the last %.0f s, %d detection(s)",
+            self.audio_samples / RATE,
+            peak_dbfs,
+            self.report_samples / RATE,
+            self.detections_total,
+        )
+        if peak_dbfs < QUIET_PEAK_DBFS:
+            LOGGER.warning("Audio is nearly silent (peak %.1f dBFS) - is the microphone muted?", peak_dbfs)
+        self.report_samples = 0
+        self.report_peak = 0
+
+    def _log_stream_end(self, reason: str) -> None:
+        if self.audio_samples:
+            LOGGER.info(
+                "Audio stream ended (%s) after %.1f s, %d detection(s)",
+                reason,
+                self.audio_samples / RATE,
+                self.detections_total,
+            )
+        self._reset_stats()
 
     def _ensure_stream(self) -> HarkStream:
         if self.stream is None:
@@ -136,6 +200,10 @@ class HarkEventHandler(AsyncEventHandler):
             self.stream = self.state.engine.create_stream(
                 targets=targets,
                 on_near_miss=self._on_near_miss,
+            )
+            LOGGER.info(
+                "Audio stream started, listening for: %s",
+                ", ".join(f'"{t.phrase}" ({t.language})' for t in targets),
             )
         return self.stream
 
@@ -158,6 +226,7 @@ class HarkEventHandler(AsyncEventHandler):
     async def _emit_detections(self, detections: list[dict]) -> None:
         for det in detections:
             self.detected_in_utterance = True
+            self.detections_total += 1
             LOGGER.info(
                 'DETECTED: phrase="%s" (%s) name=%s combined=%.2f >= %.2f '
                 "(s1=%.2f, s2=%.2f, rms=%.1fdBFS)",
@@ -200,6 +269,7 @@ class HarkEventHandler(AsyncEventHandler):
         if AudioChunk.is_type(event.type):
             chunk = self.converter.convert(AudioChunk.from_event(event))
             stream = self._ensure_stream()
+            self._track_audio(chunk.audio)
             async with self.state.lock:
                 detections = stream.push_pcm16(chunk.audio)
             if detections:
@@ -213,11 +283,44 @@ class HarkEventHandler(AsyncEventHandler):
                 if detections:
                     await self._emit_detections(detections)
                 self.stream.reset()
+            self._log_stream_end("audio-stop")
             if not self.detected_in_utterance:
                 await self.write_event(NotDetected().event())
             return False
 
         return True
+
+    async def disconnect(self) -> None:
+        self._log_stream_end("client disconnected")
+        await super().disconnect()
+
+
+def enroll_phrases(
+    engine: HarkEngine,
+    specs: list[str],
+    default_language: str = "en",
+    sensitivity: str | float = "balanced",
+    threshold_override: float | None = None,
+) -> list[EnrolledPhrase]:
+    """Enroll every valid phrase; a single bad entry must not take the whole service down."""
+    enrolled: dict[str, EnrolledPhrase] = {}
+    for spec in specs:
+        try:
+            phrase, lang = parse_phrase_spec(spec, default_language=default_language)
+            target = engine.enroll(
+                phrase=phrase,
+                language=lang,
+                sensitivity=sensitivity,
+                threshold_override=threshold_override,
+            )
+        except (KeyError, ValueError) as exc:
+            LOGGER.error('Skipping wake phrase "%s": %s', spec, exc)
+            continue
+        if target.name in enrolled:
+            LOGGER.warning('Skipping duplicate wake phrase "%s" (%s)', spec, target.name)
+            continue
+        enrolled[target.name] = target
+    return list(enrolled.values())
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -291,22 +394,21 @@ async def async_main(argv: list[str] | None = None) -> None:
     if not raw_phrases:
         raw_phrases = ["Hey Jarvis:en", "Okay Haus:de"]
 
-    parsed = parse_phrase_list(raw_phrases, default_language=args.default_language)
     engine = HarkEngine(
         stage1_checkpoint=args.stage1,
         stage2_checkpoint=args.stage2,
         threads=args.threads,
         cache_dir=args.cache_dir,
     )
-    enrolled = [
-        engine.enroll(
-            phrase=p_txt,
-            language=lang,
-            sensitivity=args.sensitivity,
-            threshold_override=args.threshold,
-        )
-        for p_txt, lang in parsed
-    ]
+    enrolled = enroll_phrases(
+        engine,
+        split_phrase_specs(raw_phrases),
+        default_language=args.default_language,
+        sensitivity=args.sensitivity,
+        threshold_override=args.threshold,
+    )
+    if not enrolled:
+        raise SystemExit("No valid wake phrase configured; see the errors above")
 
     state = HarkWyomingState(
         engine=engine,
