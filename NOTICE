@@ -1,0 +1,40 @@
+Hark
+Copyright (c) 2026 Pio Borgelt
+
+The Hark source code is released under the MIT License (see LICENSE).
+The released model weights are licensed separately under CC BY-NC 4.0
+(https://huggingface.co/Pioborgelt/hark).
+
+Training data
+-------------
+
+The released weights were trained on the following datasets. The datasets themselves are not
+part of this repository.
+
+- Multilingual LibriSpeech (MLS), CC BY 4.0.
+  V. Pratap, Q. Xu, A. Sriram, G. Synnaeve, R. Collobert. "MLS: A Large-Scale Multilingual
+  Dataset for Speech Research." Interspeech 2020. https://www.openslr.org/94/
+- LibriSpeech, CC BY 4.0.
+  V. Panayotov, G. Chen, D. Povey, S. Khudanpur. "Librispeech: an ASR corpus based on public
+  domain audio books." ICASSP 2015. https://www.openslr.org/12/
+- MUSAN, CC BY 4.0.
+  D. Snyder, G. Chen, D. Povey. "MUSAN: A Music, Speech, and Noise Corpus." arXiv:1510.08484,
+  2015. https://www.openslr.org/17/
+- VoxPopuli, CC0 1.0.
+  C. Wang et al. "VoxPopuli: A Large-Scale Multilingual Speech Corpus for Representation
+  Learning, Semi-Supervised Learning and Interpretation." ACL 2021.
+- Mozilla Common Voice, CC0 1.0. https://commonvoice.mozilla.org/
+- Synthetic speech generated with Google Gemini TTS.
+
+No changes were made to the licensed datasets other than resampling, cutting and mixing them
+for training.
+
+Third-party software
+--------------------
+
+At runtime Hark uses eSpeak NG (GPL-3.0-or-later) for phonemization, through the piper-tts
+package (GPL-3.0-or-later). Both are installed as separate packages and are included in the Docker image
+and the Home Assistant app image. Their source code is available at
+https://github.com/espeak-ng/espeak-ng and https://github.com/OHF-Voice/piper1-gpl.
+
+The Hark logo uses the Outfit typeface (SIL Open Font License 1.1), see docs/brand/README.md.
