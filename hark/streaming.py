@@ -12,11 +12,11 @@ import logging
 import math
 import os
 import re
-import time
+import unicodedata
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 import torch
@@ -24,17 +24,23 @@ import torch
 from .audio import RATE, FeatureStream
 from .residual_acoustic_model import load_model
 from .supported_detect import Matcher
-from .text import encode, encode_multi, phones
+from .text import encode, encode_multi
 from .verifier import load_verifier, score_trigger_queries
 
 LOGGER = logging.getLogger("hark")
 
 RELEASE_TAG = "v0.3.0-alpha"
-DEFAULT_REPO = os.environ.get("HARK_MODEL_REPO", "pioborgelt/hark")
+DEFAULT_REPO = os.environ.get("HARK_MODEL_REPO", "pioborgelt/hark")  # GitHub release fallback
+# Primary weight source: Hugging Face, pinned to an exact commit (SHA256 is checked on top).
+HF_REPO = os.environ.get("HARK_HF_REPO", "Pioborgelt/hark")
+HF_REVISION = os.environ.get("HARK_HF_REVISION", "8377ce85a4d3130cc80899c804489ad1f753b5f6")
 
+# `sha256` pins the exact release asset produced by scripts/export_release_weights.py.
+# Any file carrying a release filename (download, cache, models/) must match it.
 MODEL_SPECS = {
     "stage1": {
         "filename": "hark-stage1-r221-h384.pt",
+        "sha256": "c095fc5431e07a939eb482d18125e446a917864a8398edc15200bff316ebe0de",
         "local_fallbacks": [
             "models/hark-stage1-r221-h384.pt",
             "artifacts/r221-cleanhybrid-20261113-071351/h384-step200000.pt",
@@ -42,6 +48,7 @@ MODEL_SPECS = {
     },
     "stage2": {
         "filename": "hark-stage2-r222-v384.pt",
+        "sha256": "bbdb7928802bd04cfc0b399bfea6433dbf8ee1cf48cb59c6edf272deabcc3743",
         "local_fallbacks": [
             "models/hark-stage2-r222-v384.pt",
             "artifacts/r222-verifier-20261113-071450/v384-step055000.pt",
@@ -99,30 +106,71 @@ def slugify_phrase(phrase: str, language: str) -> str:
     return f"{slug}_{language}" if slug else f"wake_{language}"
 
 
+SUPPORTED_LANGUAGES = ("de", "en")
+_LANG_TAG = re.compile(r"^[A-Za-z]{2,3}$")
+_ALLOWED_PUNCTUATION = set(" -'\u2019.,!?")
+
+
+def _validate_phrase_text(text: str, spec: str) -> str:
+    """Hark pronounces German/English text; reject input espeak would read out as symbol names."""
+    phrase = " ".join(text.split())
+    if not phrase:
+        raise ValueError(f"Empty wake phrase in {spec!r}")
+    for ch in phrase:
+        if ch.isdigit() or ch in _ALLOWED_PUNCTUATION:
+            continue
+        if ch.isalpha() and unicodedata.name(ch, "").startswith("LATIN"):
+            continue
+        raise ValueError(
+            f"Unsupported character {ch!r} in wake phrase {spec!r}; use German or English words"
+        )
+    if not any(ch.isalpha() for ch in phrase):
+        raise ValueError(f"Wake phrase {spec!r} contains no letters")
+    return phrase
+
+
 def parse_phrase_spec(spec: str, default_language: str = "en") -> tuple[str, str]:
-    """Parse `'Okay Haus:de'`, `'de:Okay Haus'`, or `'Hey Jarvis'` -> `(phrase, lang)`."""
+    """Parse `'Okay Haus:de'`, `'de:Okay Haus'`, or `'Hey Jarvis'` -> `(phrase, lang)`.
+
+    A tag that looks like a language but is not `de`/`en` is an error instead of becoming part
+    of the spoken text (`'Okay Haus:fr'` would otherwise be pronounced "okay haus colon f r").
+    """
     raw = spec.strip()
     if not raw:
         raise ValueError("Empty wake phrase specification")
-    if ":" in raw:
-        left, right = raw.split(":", 1)
-        if left.strip().lower() in ("de", "en") and right.strip():
-            return right.strip(), left.strip().lower()
-        if right.strip().lower() in ("de", "en") and left.strip():
-            return left.strip(), right.strip().lower()
-    if default_language not in ("de", "en"):
+    if default_language not in SUPPORTED_LANGUAGES:
         raise ValueError(f"Unsupported language '{default_language}' (use 'en' or 'de')")
-    return raw, default_language
+    if ":" in raw:
+        text, _, tag = raw.rpartition(":")
+        if _LANG_TAG.match(tag.strip()):
+            lang = tag.strip().lower()
+            if lang not in SUPPORTED_LANGUAGES:
+                raise ValueError(
+                    f"Unsupported language '{tag.strip()}' in {spec!r}; Hark supports ':de' and ':en'"
+                )
+            return _validate_phrase_text(text, spec), lang
+        tag, _, text = raw.partition(":")
+        if tag.strip().lower() in SUPPORTED_LANGUAGES:
+            return _validate_phrase_text(text, spec), tag.strip().lower()
+    LOGGER.warning(
+        'No language tag on wake phrase "%s"; using %s. Write "%s:de" or "%s:en" to choose.',
+        raw, default_language, raw, raw,
+    )
+    return _validate_phrase_text(raw, spec), default_language
+
+
+def split_phrase_specs(raw: str | Sequence[str]) -> list[str]:
+    """Split `"A:de; B:en"` strings and lists of such strings into single specs."""
+    if isinstance(raw, str):
+        return [part.strip() for part in re.split(r"[;\n]+", raw) if part.strip()]
+    items: list[str] = []
+    for entry in raw:
+        items.extend(part.strip() for part in re.split(r"[;\n]+", str(entry)) if part.strip())
+    return items
 
 
 def parse_phrase_list(raw: str | Sequence[str], default_language: str = "en") -> list[tuple[str, str]]:
-    if isinstance(raw, str):
-        items = [part.strip() for part in re.split(r"[;\n]+", raw) if part.strip()]
-    else:
-        items = []
-        for entry in raw:
-            items.extend(part.strip() for part in str(entry).split(";") if part.strip())
-    return [parse_phrase_spec(item, default_language=default_language) for item in items]
+    return [parse_phrase_spec(item, default_language=default_language) for item in split_phrase_specs(raw)]
 
 
 def resolve_sensitivity(
@@ -152,7 +200,84 @@ def resolve_sensitivity(
     return cfg
 
 
-def _download_release_asset(repo: str, tag: str, filename: str, dest: Path) -> Path:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+class ChecksumError(ValueError):
+    """A release checkpoint does not match its pinned SHA256."""
+
+
+def _check_release_file(key: str, path: Path) -> None:
+    """Files carrying a release filename must be byte-identical to the pinned asset."""
+    spec = MODEL_SPECS[key]
+    if path.name != spec["filename"] or not spec.get("sha256"):
+        return
+    actual = _sha256(path)
+    if actual != spec["sha256"]:
+        raise ChecksumError(
+            f"{key} checkpoint {path} has sha256 {actual}, expected {spec['sha256']}"
+        )
+
+
+def _finish_download(tmp: Path, dest: Path, expected_sha256: str | None) -> Path:
+    if expected_sha256:
+        actual = _sha256(tmp)
+        if actual != expected_sha256:
+            tmp.unlink(missing_ok=True)
+            raise ChecksumError(
+                f"Downloaded {dest.name} has sha256 {actual}, expected {expected_sha256}"
+            )
+    tmp.replace(dest)
+    return dest
+
+
+def assert_weights_only(path: str | Path) -> None:
+    """Refuse checkpoints that need arbitrary pickled objects (code execution on load)."""
+    try:
+        torch.load(path, map_location="cpu", weights_only=True)
+    except Exception as exc:
+        raise ValueError(
+            f"Checkpoint {path} is not loadable with torch.load(weights_only=True); "
+            "refusing to unpickle arbitrary objects"
+        ) from exc
+
+
+def _download_url(url: str, dest: Path, expected_sha256: str | None, token: str | None) -> Path:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    headers = {"User-Agent": "hark-ww/0.3"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    LOGGER.info("Downloading %s ...", url)
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=180) as dl, open(tmp, "wb") as out:
+        while chunk := dl.read(1024 * 256):
+            out.write(chunk)
+    return _finish_download(tmp, dest, expected_sha256)
+
+
+def _download_release_asset(
+    repo: str, tag: str, filename: str, dest: Path, expected_sha256: str | None = None
+) -> Path:
+    """Fetch a weight file from Hugging Face (pinned revision), else from the GitHub release."""
+    hf_url = f"https://huggingface.co/{HF_REPO}/resolve/{HF_REVISION}/{filename}"
+    try:
+        return _download_url(hf_url, dest, expected_sha256, os.environ.get("HF_TOKEN"))
+    except ChecksumError:
+        raise
+    except Exception as exc:  # network / 404 / private repo: try the GitHub release instead
+        LOGGER.warning("Hugging Face download failed (%s); trying GitHub release", exc)
+    return _download_github_asset(repo, tag, filename, dest, expected_sha256)
+
+
+def _download_github_asset(
+    repo: str, tag: str, filename: str, dest: Path, expected_sha256: str | None = None
+) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
@@ -185,8 +310,7 @@ def _download_release_asset(repo: str, tag: str, filename: str, dest: Path) -> P
                 with urllib.request.urlopen(dl_req, timeout=180) as dl, open(tmp, "wb") as out:
                     while chunk := dl.read(1024 * 256):
                         out.write(chunk)
-                tmp.replace(dest)
-                return dest
+                return _finish_download(tmp, dest, expected_sha256)
         except Exception as exc:
             LOGGER.debug("GitHub API asset lookup fallback (%s), trying direct URL...", exc)
 
@@ -194,8 +318,7 @@ def _download_release_asset(repo: str, tag: str, filename: str, dest: Path) -> P
     with urllib.request.urlopen(req, timeout=180) as dl, open(tmp, "wb") as out:
         while chunk := dl.read(1024 * 256):
             out.write(chunk)
-    tmp.replace(dest)
-    return dest
+    return _finish_download(tmp, dest, expected_sha256)
 
 
 def resolve_checkpoints(
@@ -223,13 +346,24 @@ def resolve_checkpoints(
         spec = MODEL_SPECS[key]
         found = next((Path(cand) for cand in spec["local_fallbacks"] if Path(cand).is_file()), None)
         if found is not None:
+            _check_release_file(key, found)
             resolved.append(found)
             continue
         cached = cache_root / spec["filename"]
         if cached.is_file():
-            resolved.append(cached)
-            continue
-        resolved.append(_download_release_asset(DEFAULT_REPO, RELEASE_TAG, spec["filename"], cached))
+            try:
+                _check_release_file(key, cached)
+                resolved.append(cached)
+                continue
+            except ChecksumError as exc:
+                # Truncated or stale cache entry: discard it and fetch the pinned asset again.
+                LOGGER.warning("%s; downloading again", exc)
+                cached.unlink(missing_ok=True)
+        resolved.append(
+            _download_release_asset(
+                DEFAULT_REPO, RELEASE_TAG, spec["filename"], cached, spec.get("sha256")
+            )
+        )
     return resolved[0], resolved[1]
 
 
@@ -271,6 +405,8 @@ class HarkEngine:
         if threads is not None and threads > 0:
             torch.set_num_threads(int(threads))
         s1_path, s2_path = resolve_checkpoints(stage1_checkpoint, stage2_checkpoint, cache_dir=cache_dir)
+        for path in (s1_path, s2_path):
+            assert_weights_only(path)
         self.device = device
         self.stage1_path = s1_path
         self.stage2_path = s2_path
