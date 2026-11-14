@@ -1,0 +1,26 @@
+configuration:
+  phrases:
+    name: Aktivierungswörter (Wake-Words)
+    description: >-
+      Eine Phrase pro Eintrag, mit :de (Deutsch) oder :en (Englisch) am Ende, z. B.
+      "Okay Haus:de" oder "Hey Jarvis:en". Danach unter Einstellungen → Sprachassistenten als Aktivierungswort auswählen.
+  sensitivity:
+    name: Empfindlichkeit
+    description: >-
+      strict = weniger Fehlauslösungen, sensitive = weniger überhörte Aktivierungswörter. Mit
+      balanced anfangen.
+  threads:
+    name: CPU-Threads
+    description: CPU-Threads für die Erkennung. 2 reichen für die meisten Systeme.
+  log_near_misses:
+    name: Beinahe-Treffer protokollieren
+    description: >-
+      Schreibt knapp verpasste Wake-Words mit Scores ins Protokoll. Hilfreich, wenn ein Wake-Word
+      überhört wird.
+  save_debug_clips:
+    name: Debug-Clips speichern
+    description: >-
+      Speichert die letzten 30 erkannten oder knapp verpassten 3-Sekunden-Clips unter
+      /data/debug_clips. Das zeichnet echten Raumton auf; nur zur Fehlersuche einschalten.
+network:
+  10400/tcp: Wyoming-Protokoll (nur für Satelliten oder Clients außerhalb von Home Assistant)

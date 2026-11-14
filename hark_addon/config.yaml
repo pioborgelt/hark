@@ -1,18 +1,25 @@
-name: "Hark Wake Word (Zero-Shot EN/DE)"
+name: "Hark Wake Word"
 description: "Type any English or German wake phrase as text — zero audio samples or training required."
-version: "0.3.0"
+version: "0.3.4-alpha"
 slug: "hark_wakeword"
 url: "https://github.com/pioborgelt/hark"
 init: false
+# Start before Home Assistant Core: otherwise satellites connect during boot, find no wake word
+# provider ("wake-provider-missing") and stay deaf until they are reloaded.
+startup: services
 arch:
   - amd64
   - aarch64
-ports:
-  10400/tcp: 10400
-ports_description:
-  10400/tcp: "Wyoming Protocol TCP port"
+# Registers the Wyoming service with Home Assistant (needs the Supervisor API).
+hassio_api: true
 discovery:
   - wyoming
+# Home Assistant reaches the add-on over the internal network; no host port by default.
+# Set a host port under Configuration -> Network only for clients outside Home Assistant.
+ports:
+  10400/tcp: null
+ports_description:
+  10400/tcp: "Wyoming Protocol (only needed for satellites/clients outside Home Assistant)"
 options:
   phrases:
     - "Okay Haus:de"
@@ -23,7 +30,9 @@ options:
   save_debug_clips: false
 schema:
   phrases:
-    - str
+    # Every phrase needs its language tag. Home Assistant shows this pattern verbatim in its
+    # error message, so it is kept short and readable; Hark validates the text itself.
+    - "match(^.+:(de|en)$)"
   sensitivity: list(strict|balanced|sensitive)
   threads: int(1,8)
   log_near_misses: bool

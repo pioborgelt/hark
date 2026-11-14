@@ -1,0 +1,25 @@
+configuration:
+  phrases:
+    name: Wake phrases
+    description: >-
+      One phrase per entry, ending in :de (German) or :en (English), e.g. "Okay Haus:de" or
+      "Hey Jarvis:en". Add a phrase, then pick it in your voice assistant.
+  sensitivity:
+    name: Sensitivity
+    description: >-
+      strict = fewer false triggers, sensitive = fewer missed wake words. Start with balanced.
+  threads:
+    name: CPU threads
+    description: CPU threads used for detection. 2 is enough for most systems.
+  log_near_misses:
+    name: Log near misses
+    description: >-
+      Logs phrases that were almost recognized, with their scores. Helpful when a wake word is
+      missed.
+  save_debug_clips:
+    name: Save debug clips
+    description: >-
+      Saves the last 30 detected or almost detected 3-second clips to /data/debug_clips. This
+      records real room audio; only enable it while debugging.
+network:
+  10400/tcp: Wyoming Protocol (only needed for satellites or clients outside Home Assistant)
