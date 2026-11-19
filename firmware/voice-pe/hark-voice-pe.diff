@@ -1,0 +1,248 @@
+--- upstream/voice-pe/home-assistant-voice.yaml	2026-11-17 11:14:16.221315472 +0100
++++ voice-pe/home-assistant-voice.yaml	2026-11-17 19:17:58.368527642 +0100
+@@ -261,6 +261,7 @@
+           id: media_mixing_input
+           decibel_reduction: 0
+           duration: 1.0s
++      - lambda: id(hark_duck_db) = 0;  # Hark: ducking diagnostics
+       # Refresh the LED ring
+       - script.execute: control_leds
+     on_turn_on:
+@@ -270,6 +271,7 @@
+           id: media_mixing_input
+           decibel_reduction: 20
+           duration: 0.0s
++      - lambda: id(hark_duck_db) = 20;  # Hark: ducking diagnostics
+       # Enable stop wake word
+       - micro_wake_word.enable_model: stop
+       # Ring timer
+@@ -336,7 +338,9 @@
+                     else:
+                       - if:
+                           condition:
+-                            voice_assistant.is_running:
++                            # Hark: in streaming mode the pipeline always runs; only a
++                            # real conversation counts
++                            lambda: return ${hark_in_conversation};
+                           then:
+                             - voice_assistant.stop:
+                           else:
+@@ -361,14 +365,21 @@
+                                             condition:
+                                               and:
+                                                 - switch.is_off: master_mute_switch
+-                                                - not: voice_assistant.is_running
++                                                - lambda: return !${hark_in_conversation};  # Hark
+                                             then:
+                                               - script.execute:
+                                                   id: play_sound
+                                                   priority: true
+                                                   sound_file: "center_button_press_sound"
+                                               - delay: 300ms
+-                                              - voice_assistant.start:
++                                              # Hark: in streaming mode, one conversation without a wake word
++                                              - if:
++                                                  condition:
++                                                    lambda: return id(hark_ha_mode);
++                                                  then:
++                                                    - script.execute: hark_direct_start
++                                                  else:
++                                                    - voice_assistant.start:
+       # Double Click
+       #  . Exposed as an event entity. To be used in automations inside Home Assistant
+       - timing:
+@@ -1714,13 +1725,15 @@
+           id: media_mixing_input
+           decibel_reduction: 20
+           duration: 0.0s
++      - lambda: id(hark_duck_db) = 20;  # Hark: ducking diagnostics
+     on_state:
+       if:
+         condition:
+           and:
+             - switch.is_off: timer_ringing
+-            - not:
+-                voice_assistant.is_running:
++            # Hark: in streaming mode the pipeline always runs; only a real
++            # conversation keeps the music ducked
++            - lambda: return !${hark_in_conversation};
+             - not:
+                 media_player.is_announcing: external_media_player
+         then:
+@@ -1728,6 +1741,7 @@
+               id: media_mixing_input
+               decibel_reduction: 0
+               duration: 1.0s
++          - lambda: id(hark_duck_db) = 0;  # Hark: ducking diagnostics
+ 
+ voice_kit:
+   id: voice_kit_component
+@@ -1755,6 +1769,13 @@
+     components:
+       - api
+       - micro_wake_word
++  # Hark: voice_assistant from the same commit plus the Hark patch
++  # (firmware/patch_voice_assistant.py): ignores a RUN_END that belongs to an
++  # earlier pipeline run
++  - source:
++      type: local
++      path: components
++    components:
+       - voice_assistant
+ 
+ audio_dac:
+@@ -1792,44 +1813,54 @@
+                 switch.is_on: timer_ringing
+               then:
+                 - switch.turn_off: timer_ringing
+-              # Stop voice assistant if running
++              # Hark: in streaming mode an on-device wake word never starts
++              # the assistant; it only stops a conversation or an announcement
+               else:
+                 - if:
+                     condition:
+-                      voice_assistant.is_running:
++                      lambda: return id(hark_ha_mode);
+                     then:
+-                      voice_assistant.stop:
+-                    # Stop any other media player announcement
++                      - script.execute:
++                          id: hark_device_wake_word
++                          wake_word: !lambda return wake_word;
++                    # Stop voice assistant if running
+                     else:
+                       - if:
+                           condition:
+-                            media_player.is_announcing:
+-                              id: external_media_player
++                            voice_assistant.is_running:
+                           then:
+-                            - media_player.stop:
+-                                announcement: true
+-                                id: external_media_player
+-                          # Start the voice assistant and play the wake sound, if enabled
++                            voice_assistant.stop:
++                          # Stop any other media player announcement
+                           else:
+                             - if:
+                                 condition:
+-                                  lambda: return id(va).is_wake_word_audio_active();
+-                                then:
+-                                  - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+-                                  - script.execute: control_leds
+-                            - if:
+-                                condition:
+-                                  and:
+-                                    - switch.is_on: wake_sound
+-                                    - lambda: return !id(va).is_wake_word_audio_active();
++                                  media_player.is_announcing:
++                                    id: external_media_player
+                                 then:
+-                                  - script.execute:
+-                                      id: play_sound
+-                                      priority: true
+-                                      sound_file: "wake_word_triggered_sound"
+-                                  - delay: 300ms
+-                            - voice_assistant.start:
+-                                wake_word: !lambda return wake_word;
++                                  - media_player.stop:
++                                      announcement: true
++                                      id: external_media_player
++                                # Start the voice assistant and play the wake sound, if enabled
++                                else:
++                                  - if:
++                                      condition:
++                                        lambda: return id(va).is_wake_word_audio_active();
++                                      then:
++                                        - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
++                                        - script.execute: control_leds
++                                  - if:
++                                      condition:
++                                        and:
++                                          - switch.is_on: wake_sound
++                                          - lambda: return !id(va).is_wake_word_audio_active();
++                                      then:
++                                        - script.execute:
++                                            id: play_sound
++                                            priority: true
++                                            sound_file: "wake_word_triggered_sound"
++                                        - delay: 300ms
++                                  - voice_assistant.start:
++                                      wake_word: !lambda return wake_word;
+ 
+ select:
+   - platform: template
+@@ -1904,15 +1935,18 @@
+           - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+           - script.execute: control_leds
+   # When the voice assistant starts: Play a wake up sound, duck audio.
++  # Hark: streaming runs start before any wake word, so they duck later, in
++  # on_wake_word_detected (hark-streaming.yaml)
+   on_start:
+     - if:
+         condition:
+-          lambda: return !id(va).is_wake_word_audio_active();
++          lambda: return !id(va).is_wake_word_audio_active() && !id(hark_streaming_run);
+         then:
+           - mixer_speaker.apply_ducking:
+               id: media_mixing_input
+               decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
+               duration: 0.0s         # The duration of the transition (default is no transition)
++          - lambda: id(hark_duck_db) = 20;  # Hark: ducking diagnostics
+   on_wake_word_detected:
+     - if:
+         condition:
+@@ -1922,6 +1956,7 @@
+               id: media_mixing_input
+               decibel_reduction: 20
+               duration: 0.0s
++          - lambda: id(hark_duck_db) = 20;  # Hark: ducking diagnostics
+   on_wake_word_rejected:
+     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+     - script.execute: control_leds
+@@ -1955,24 +1990,31 @@
+           # Start a script that would potentially enable the stop word if the response is longer than a second
+           - script.execute: activate_stop_word_once
+   # When the voice assistant ends ...
++  # Hark: only in the original mode. In streaming mode "not is_running" never
++  # comes; hark-streaming.yaml un-ducks on on_idle or when streaming restarts.
+   on_end:
+-    - wait_until:
+-        not:
+-          voice_assistant.is_running:
+-    # Stop ducking audio.
+-    - mixer_speaker.apply_ducking:
+-        id: media_mixing_input
+-        decibel_reduction: 0
+-        duration: 1.0s
+-    # If the end happened because of an error, let the error phase on for a second
+     - if:
+         condition:
+-          lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
++          lambda: return !id(hark_ha_mode);
+         then:
+-          - delay: 1s
+-    # Reset the voice assistant phase id and reset the LED animations.
+-    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+-    - script.execute: control_leds
++          - wait_until:
++              not:
++                voice_assistant.is_running:
++          # Stop ducking audio.
++          - mixer_speaker.apply_ducking:
++              id: media_mixing_input
++              decibel_reduction: 0
++              duration: 1.0s
++          - lambda: id(hark_duck_db) = 0;  # Hark: ducking diagnostics
++          # If the end happened because of an error, let the error phase on for a second
++          - if:
++              condition:
++                lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
++              then:
++                - delay: 1s
++          # Reset the voice assistant phase id and reset the LED animations.
++          - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
++          - script.execute: control_leds
+   on_timer_finished:
+     - switch.turn_on: timer_ringing
+   on_timer_started:

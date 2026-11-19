@@ -1,0 +1,67 @@
+# =============================================================================
+# Hark firmware for the ReSpeaker Lite (XIAO ESP32-S3)
+#
+# = formatBCE Respeaker Lite satellite 2026.11.1 (factory config)
+#   + Hark streaming switch ("Wake word engine location")
+#   + updates from the Hark install page instead of formatBCE
+#
+# Installed from https://pioborgelt.github.io/hark/firmware/ (ESP Web Tools).
+# hark-respeaker-test.yaml is the same plus simulation buttons for testing.
+# Build: esphome -s hark_fw_version 2026.11.1-harkN compile hark-respeaker.yaml
+# =============================================================================
+
+substitutions:
+  respeaker_lite_ref: 2026.11.1
+  hark_fw_version: 2026.11.1-dev
+  hark_update_source: https://pioborgelt.github.io/hark/firmware/respeaker-lite/manifest.json
+
+packages:
+  core_base: !include ../packages/core/base.yaml
+  core_voice_assistant: !include ../packages/core/voice-assistant.yaml
+  core_media_player: !include ../packages/core/media-player.yaml
+  core_timers_alarm: !include ../packages/core/timers-alarm.yaml
+  core_controls: !include ../packages/core/controls.yaml
+  respeaker_lite_hardware: !include ../packages/respeaker-lite/hardware.yaml
+  lite_device: !include ../packages/lite/device.yaml
+  hark_streaming: !include ../packages/core/hark-streaming.yaml
+
+esphome:
+  name: hark-respeaker
+  friendly_name: ReSpeaker Lite
+  # Each device gets a unique name on the network.
+  name_add_mac_suffix: true
+  project:
+    # must match the name in firmware/make_manifest.py
+    name: Hark.ReSpeaker Lite
+    version: ${hark_fw_version}
+
+wifi:
+  on_connect:
+    - script.execute: control_leds
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+  - platform: http_request
+    id: ota_http_request
+
+http_request:
+
+# Firmware updates come from the Hark install page, so an update keeps the switch
+update:
+  - platform: http_request
+    name: None
+    id: update_http_request
+    source: ${hark_update_source}
+
+# ESPHome's voice_assistant with the Hark patch (firmware/patch_voice_assistant.py):
+# ignores a RUN_END that belongs to an earlier pipeline run
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [voice_assistant]
+
+# Wi-Fi setup over USB (install page or web.esphome.io). No Bluetooth: re-enabling
+# BLE after a Wi-Fi drop crashed the Bluedroid stack during playback (2026-11-17).
+improv_serial:

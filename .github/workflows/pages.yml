@@ -1,0 +1,84 @@
+name: Deploy firmware installer (and web demo) to GitHub Pages
+
+# Publishes https://pioborgelt.github.io/hark/
+#   /firmware/  install page (firmware/site) + update manifests of the newest
+#               firmware-hark* release (.github/workflows/firmware.yml)
+#   /           web demo, once scripts/export_web_demo.py is in the repo
+# The firmware's update entities point at /firmware/<device>/manifest.json,
+# so that path must never move.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "demo/**"
+      - "scripts/export_web_demo.py"
+      - "firmware/site/**"
+      - "firmware/make_manifest.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python export dependencies
+        if: hashFiles('scripts/export_web_demo.py') != ''
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends espeak-ng libsndfile1
+          python -m pip install --upgrade pip
+          python -m pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+            torch onnx onnxscript .
+
+      - name: Export ONNX models and WASM runtime
+        if: hashFiles('scripts/export_web_demo.py') != ''
+        run: python scripts/export_web_demo.py --out demo
+
+      - name: Add firmware installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p demo/firmware
+          cp -r firmware/site/. demo/firmware/
+          tag=$(gh release list --limit 100 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("firmware-hark"))] | sort_by(.createdAt) | last | .tagName // empty')
+          if [ -n "$tag" ]; then
+            for device in voice-pe respeaker-lite; do
+              mkdir -p "demo/firmware/$device"
+              gh release download "$tag" --pattern "hark-$device-*.bin" --dir "demo/firmware/$device"
+              python firmware/make_manifest.py "demo/firmware/$device" "$device" \
+                "https://github.com/${{ github.repository }}/releases/tag/$tag"
+            done
+          else
+            echo "No firmware release yet; the install page is published without firmware."
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: demo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

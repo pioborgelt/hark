@@ -1,0 +1,476 @@
+# =============================================================================
+# Hark — "Wake word engine location" switch for XMOS-based voice satellites
+#
+# Adds the select "Wake word engine location" (On device / In Home Assistant).
+#
+#   On device (default):   the firmware behaves exactly like the original.
+#   In Home Assistant:     the device streams its microphone to Home Assistant
+#                          all the time, so a wake word engine there (Hark,
+#                          openWakeWord, ...) detects the wake word.
+#
+# Why the original logic needs changes in streaming mode (ESPHome
+# voice_assistant): in continuous mode is_running() is true almost all the
+# time, on_start fires when streaming starts (before any wake word),
+# request_stop() ends streaming for good, and on_idle fires between runs.
+# So in streaming mode this package
+#   - ducks the music on on_wake_word_detected (not on_start),
+#   - un-ducks and resets the phase on on_idle or when streaming restarts,
+#   - treats "streaming and phase idle" as NOT in a conversation, so the center
+#     button and the stop word behave like the original,
+#   - re-arms streaming after every stop (button, stop word, error, reconnect),
+#     with growing pauses when the wake word stage fails (engine unreachable),
+#   - does not stream at all while the microphone is muted.
+# microWakeWord stays on for the stop word and timers; in streaming mode its
+# wake words never start the assistant and there is no wake sound.
+#
+# Required IDs: va, mww, media_mixing_input, external_media_player,
+# timer_ringing, voice_assistant_phase, init_in_progress, control_leds, and the
+# mute switch named by ${hark_mute_switch}.
+# The core files call these scripts at the places marked "Hark:".
+# =============================================================================
+
+substitutions:
+  hark_mute_switch: mic_mute_switch
+  # True while a real conversation runs: a pipeline runs and it is not just
+  # streaming while waiting for the wake word.
+  hark_in_conversation: >-
+    (id(va).is_running() && !(id(hark_streaming_run) &&
+    (id(voice_assistant_phase) == ${voice_assist_idle_phase_id} ||
+    id(voice_assistant_phase) == ${voice_assist_error_phase_id})))
+
+globals:
+  # Mirror of the select: true = "In Home Assistant"
+  - id: hark_ha_mode
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The current pipeline run was started by the streaming logic (continuous)
+  - id: hark_streaming_run
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # A streaming-mode conversation ducked the music / changed the phase and
+  # needs the clean-up (un-duck, phase idle, LEDs) once it is over
+  - id: hark_needs_cleanup
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The button direct start is switching runs; the watchdog keeps out
+  - id: hark_direct_start_pending
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Error back-off for the wake word stage
+  - id: hark_error_count
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: hark_retry_at_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: hark_stream_started_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  # Current ducking in dB (diagnostics only; set next to every apply_ducking)
+  - id: hark_duck_db
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # Pipeline runs requested from Home Assistant whose RUN_END has not arrived
+  # yet. ESPHome cannot tell runs apart: a late RUN_END of an older run stops
+  # whatever run is starting at that moment, and over a slow link Home
+  # Assistant answers up to a second late. So no new run may start before
+  # every older run has ended (or 3 s passed).
+  - id: hark_runs_open
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # Start of the current streaming run (watchdog start or on_idle restart)
+  - id: hark_run_started_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: hark_idle_since_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: hark_last_error
+    type: std::string
+    restore_value: no
+    initial_value: '"-"'
+
+select:
+  - platform: template
+    id: wake_word_engine_location
+    name: Wake word engine location
+    icon: mdi:account-voice
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_option: On device
+    options:
+      - On device
+      - In Home Assistant
+    on_value:
+      - lambda: |-
+          id(hark_ha_mode) = (x == "In Home Assistant");
+          // A conversation that started in the other mode still needs its clean-up
+          if (id(va).is_running()) id(hark_needs_cleanup) = true;
+          id(hark_error_count) = 0;
+          id(hark_retry_at_ms) = 0;
+          if (!id(hark_ha_mode)) {
+            // Back to the original behaviour: no wake word stage in HA
+            id(va).set_use_wake_word(false);
+          }
+      - script.execute: hark_update_streaming
+
+voice_assistant:
+  on_end:
+    - lambda: if (id(hark_runs_open) > 0) id(hark_runs_open)--;
+  on_client_disconnected:
+    - lambda: id(hark_runs_open) = 0;
+  # Home Assistant detected the wake word (only possible while streaming)
+  on_wake_word_detected:
+    - if:
+        condition:
+          lambda: return id(hark_streaming_run);
+        then:
+          - script.stop: hark_finish_conversation
+          - lambda: |-
+              id(hark_needs_cleanup) = true;
+              id(hark_error_count) = 0;
+              id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+          - script.execute: control_leds
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 20
+              duration: 0.0s
+          - lambda: id(hark_duck_db) = 20;
+  # STT starts. Covers follow-up questions ("continue conversation"), which
+  # start without a wake word.
+  on_listening:
+    - if:
+        condition:
+          lambda: return id(hark_streaming_run);
+        then:
+          - script.stop: hark_finish_conversation
+          - lambda: id(hark_needs_cleanup) = true;
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 20
+              duration: 0.0s
+          - lambda: id(hark_duck_db) = 20;
+  # A continuous run ended and the next one starts right now
+  on_idle:
+    - lambda: id(hark_runs_open)++;
+    - if:
+        condition:
+          lambda: return id(hark_needs_cleanup);
+        then:
+          - script.execute: hark_finish_conversation
+        else:
+          # A streaming run that ended within 3 s without a wake word: most
+          # likely a late RUN_END of an older run stopped it. Restarting at
+          # once can repeat that in a loop (seen with a weak Wi-Fi link), so
+          # stop and let the watchdog restart after a pause.
+          - if:
+              condition:
+                lambda: return id(hark_streaming_run) && millis() - id(hark_run_started_ms) < 3000;
+              then:
+                - lambda: |-
+                    ESP_LOGW("hark", "Streaming run ended after %u ms, pausing before the restart",
+                             (unsigned) (millis() - id(hark_run_started_ms)));
+                    id(va).set_continuous(false);
+                    if (id(hark_retry_at_ms) == 0) id(hark_retry_at_ms) = millis() + 1500;
+                # on_idle runs before ESPHome starts the next run, so stop it
+                # right after
+                - delay: 20ms
+                - lambda: |-
+                    if (id(hark_streaming_run) && !(${hark_in_conversation})) id(va).request_stop();
+    - lambda: id(hark_run_started_ms) = millis();
+  on_error:
+    - lambda: id(hark_last_error) = code;
+    - if:
+        condition:
+          # No conversation was going on (hark_needs_cleanup is false), so the
+          # error came from streaming. hark_streaming_run is not checked: for
+          # some errors ESPHome stops the run before this trigger runs.
+          lambda: return id(hark_ha_mode) && !id(hark_needs_cleanup) && code != "duplicate_wake_up_detected";
+        then:
+          # The wake word stage failed before any wake word (for example the
+          # engine is not reachable). Stop and retry later instead of looping.
+          - lambda: |-
+              if (millis() - id(hark_stream_started_ms) > 60000) id(hark_error_count) = 0;
+              id(hark_error_count)++;
+              uint32_t wait_ms = 5000u << std::min(id(hark_error_count) - 1, 4);  // 5 s .. 80 s
+              if (wait_ms > 60000u) wait_ms = 60000u;
+              id(hark_retry_at_ms) = millis() + wait_ms;
+              ESP_LOGW("hark", "Wake word stage failed (%s), retry in %u s", code.c_str(), (unsigned) (wait_ms / 1000));
+              id(va).request_stop();
+    - if:
+        condition:
+          lambda: return id(hark_ha_mode);
+        then:
+          # Stop and restart after a short pause. Without the pause the late
+          # RUN_END of the failed run can end the freshly restarted run, whose
+          # RUN_END ends the next one, and so on (seen on the ReSpeaker test).
+          - lambda: |-
+              id(va).request_stop();
+              if (id(hark_retry_at_ms) == 0) id(hark_retry_at_ms) = millis() + 1500;
+          # Show the error phase for a second, then reset (on_end does this in
+          # the original mode)
+          - lambda: id(hark_needs_cleanup) = true;
+          - script.execute: hark_finish_conversation
+
+interval:
+  - interval: 500ms
+    then:
+      - script.execute: hark_update_streaming
+
+script:
+  # Un-duck, reset the phase and the LEDs after a streaming-mode conversation
+  - id: hark_finish_conversation
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
+          then:
+            - delay: 1s
+      - lambda: |-
+          id(hark_needs_cleanup) = false;
+          if (id(voice_assistant_phase) != ${voice_assist_not_ready_phase_id})
+            id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+      - script.execute: control_leds
+      # A reply or an announcement may still play; it keeps the ducking
+      - wait_until:
+          condition:
+            not:
+              media_player.is_announcing: external_media_player
+          timeout: 120s
+      - if:
+          condition:
+            and:
+              - switch.is_off: timer_ringing
+              - lambda: return !${hark_in_conversation};
+          then:
+            - mixer_speaker.apply_ducking:
+                id: media_mixing_input
+                decibel_reduction: 0
+                duration: 1.0s
+            - lambda: id(hark_duck_db) = 0;
+
+  # Watchdog: starts, re-arms and stops streaming. Runs every 500 ms and on
+  # every relevant change.
+  - id: hark_update_streaming
+    mode: single
+    then:
+      - lambda: |-
+          if (id(hark_direct_start_pending)) return;
+          auto *assistant = id(va);
+          const bool running = assistant->is_running();
+          if (!running) {
+            if (id(hark_streaming_run) && !id(hark_needs_cleanup) && id(hark_retry_at_ms) == 0 &&
+                millis() - id(hark_run_started_ms) < 3000) {
+              // A streaming run ended within 3 s (see on_idle): pause before the restart
+              ESP_LOGW("hark", "Streaming run ended after %u ms, pausing before the restart",
+                       (unsigned) (millis() - id(hark_run_started_ms)));
+              id(hark_retry_at_ms) = millis() + 1500;
+            }
+            id(hark_streaming_run) = false;
+            if (id(hark_idle_since_ms) == 0) id(hark_idle_since_ms) = millis();
+          } else {
+            id(hark_idle_since_ms) = 0;
+          }
+          const bool connected = assistant->get_api_connection() != nullptr;
+          const bool allowed = id(hark_ha_mode) && connected && !id(${hark_mute_switch}).state &&
+                               !id(init_in_progress);
+          const bool conversation = ${hark_in_conversation};
+
+          if (running && id(hark_streaming_run)) {
+            if (!allowed) {
+              if (conversation) {
+                assistant->set_continuous(false);   // let the conversation finish, then stay off
+              } else {
+                ESP_LOGI("hark", "Stopping microphone streaming");
+                assistant->request_stop();
+              }
+            } else {
+              if (millis() - id(hark_stream_started_ms) > 60000) id(hark_error_count) = 0;  // works again
+              // Safety nets: no conversation is going on (no wake word, no
+              // follow-up), so a conversation phase or ducking left behind by a
+              // late event of an older run is stale. The music must never stay
+              // ducked while the device just listens.
+              if (!id(hark_needs_cleanup) && !id(hark_finish_conversation).is_running()) {
+                const int ph = id(voice_assistant_phase);
+                if (ph == ${voice_assist_waiting_for_command_phase_id} || ph == ${voice_assist_listening_for_command_phase_id} ||
+                    ph == ${voice_assist_thinking_phase_id} || ph == ${voice_assist_replying_phase_id}) {
+                  ESP_LOGW("hark", "Resetting a stale voice phase (%d)", ph);
+                  id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+                  id(control_leds).execute();
+                }
+                if (id(hark_duck_db) > 0 && !id(timer_ringing).state &&
+                    id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+                  ESP_LOGW("hark", "Removing stale ducking");
+                  id(media_mixing_input).apply_ducking(0, 1000);
+                  id(hark_duck_db) = 0;
+                }
+              }
+            }
+            return;
+          }
+          if (running) return;               // a one-shot run (button, on-device wake word)
+
+          if (id(hark_needs_cleanup) && !id(hark_finish_conversation).is_running())
+            id(hark_finish_conversation).execute();
+
+          if (!allowed) return;
+          if (id(hark_retry_at_ms) != 0 && (int32_t) (millis() - id(hark_retry_at_ms)) < 0) return;
+          id(hark_retry_at_ms) = 0;
+          // Wait for the RUN_END of every older run (see hark_runs_open)
+          if (id(hark_runs_open) > 0 && millis() - id(hark_idle_since_ms) < 3000) return;
+          id(hark_runs_open) = 1;
+          ESP_LOGI("hark", "Starting microphone streaming to Home Assistant");
+          id(hark_streaming_run) = true;
+          id(hark_stream_started_ms) = millis();
+          id(hark_run_started_ms) = millis();
+          assistant->set_use_wake_word(true);
+          assistant->set_wake_word("");
+          assistant->request_start(true, true);
+
+  # Center button (or start_va action) in streaming mode: one conversation
+  # without a wake word, then streaming resumes.
+  - id: hark_direct_start
+    mode: single
+    then:
+      - script.stop: hark_finish_conversation
+      - lambda: |-
+          id(hark_direct_start_pending) = true;
+          id(va).request_stop();
+      - wait_until:
+          condition:
+            lambda: return !id(va).is_running();
+          timeout: 3s
+      # Wait for the RUN_END of every older run, otherwise it stops this one
+      - wait_until:
+          condition:
+            lambda: return id(hark_runs_open) <= 0;
+          timeout: 3s
+      - lambda: |-
+          id(hark_runs_open) = 1;
+          id(hark_streaming_run) = false;
+          id(hark_needs_cleanup) = true;
+          id(va).set_use_wake_word(false);
+          id(va).set_wake_word("");
+          id(va).request_start(false, true);
+          id(hark_direct_start_pending) = false;
+
+  # A microWakeWord detection in streaming mode (the stop word, or an
+  # on-device wake word): never starts the assistant, only stops things.
+  - id: hark_device_wake_word
+    parameters:
+      wake_word: string
+    then:
+      - if:
+          condition:
+            lambda: return ${hark_in_conversation};
+          then:
+            - logger.log:
+                level: INFO
+                format: "Hark: on-device wake word '%s' stops the conversation"
+                args: [ 'wake_word.c_str()' ]
+            - voice_assistant.stop:
+          else:
+            - if:
+                condition:
+                  media_player.is_announcing:
+                    id: external_media_player
+                then:
+                  - media_player.stop:
+                      announcement: true
+                      id: external_media_player
+                else:
+                  - logger.log:
+                      level: INFO
+                      format: "Hark: on-device wake word '%s' ignored, the wake word engine is in Home Assistant"
+                      args: [ 'wake_word.c_str()' ]
+
+# Diagnostics: the device's inner state, visible in Home Assistant
+text_sensor:
+  - platform: template
+    id: hark_phase_text
+    name: Voice phase
+    icon: mdi:state-machine
+    entity_category: diagnostic
+    update_interval: 250ms
+    # Publishes only on change
+    lambda: |-
+      std::string v;
+      switch (id(voice_assistant_phase)) {
+        case ${voice_assist_idle_phase_id}: v = "idle"; break;
+        case ${voice_assist_waiting_for_command_phase_id}: v = "waiting for command"; break;
+        case ${voice_assist_listening_for_command_phase_id}: v = "listening"; break;
+        case ${voice_assist_thinking_phase_id}: v = "thinking"; break;
+        case ${voice_assist_replying_phase_id}: v = "replying"; break;
+        case ${voice_assist_not_ready_phase_id}: v = "not ready"; break;
+        case ${voice_assist_error_phase_id}: v = "error"; break;
+        default: v = "unknown";
+      }
+      if (id(hark_phase_text).has_state() && id(hark_phase_text).state == v) return {};
+      return v;
+  - platform: template
+    id: hark_streaming_text
+    name: Streaming status
+    icon: mdi:microphone-message
+    entity_category: diagnostic
+    update_interval: 250ms
+    # Publishes only on change
+    lambda: |-
+      auto compute = [&]() -> std::string {
+        if (!id(hark_ha_mode)) return std::string("off (wake word on device)");
+        if (id(va).get_api_connection() == nullptr) return std::string("off (no Home Assistant connection)");
+        if (id(${hark_mute_switch}).state) return std::string("off (muted)");
+        if (id(hark_direct_start_pending) || (id(va).is_running() && !id(hark_streaming_run)))
+          return std::string("conversation started by button");
+        if (id(va).is_running() && id(hark_streaming_run))
+          return std::string(${hark_in_conversation} ? "conversation" : "streaming, waiting for wake word");
+        if (id(hark_retry_at_ms) != 0) {
+          int32_t left = (int32_t) (id(hark_retry_at_ms) - millis());
+          if (left > 0) return std::string("paused, retry in " + to_string((left + 999) / 1000) + " s");
+        }
+        return std::string("starting");
+      };
+      std::string v = compute();
+      if (id(hark_streaming_text).has_state() && id(hark_streaming_text).state == v) return {};
+      return v;
+  - platform: template
+    id: hark_last_error_text
+    name: Last voice error
+    icon: mdi:alert-circle-outline
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      if (id(hark_last_error_text).has_state() && id(hark_last_error_text).state == id(hark_last_error)) return {};
+      return id(hark_last_error);
+
+binary_sensor:
+  - platform: template
+    id: hark_streaming_active
+    name: Streaming to Home Assistant
+    icon: mdi:access-point-network
+    entity_category: diagnostic
+    lambda: return id(va).is_running() && id(hark_streaming_run);
+  - platform: template
+    id: hark_music_ducked
+    name: Music ducked
+    icon: mdi:volume-low
+    entity_category: diagnostic
+    lambda: return id(hark_duck_db) > 0;
+  - platform: template
+    id: hark_in_conversation_sensor
+    name: In conversation
+    icon: mdi:chat-processing
+    entity_category: diagnostic
+    lambda: return ${hark_in_conversation};

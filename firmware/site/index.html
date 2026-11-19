@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hark Firmware Installer</title>
+  <meta name="description" content="Install Hark firmware on a Home Assistant Voice PE or ReSpeaker Lite, adding a Wake word engine location switch so Hark can listen for any wake word you type.">
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1d2127; --muted: #5b6470; --card: #f5f7fa; --border: #dde2e8;
+      --accent: #2563eb; --accent-fg: #ffffff; --warn-bg: #fff7e6; --warn-border: #f0c36d;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #121418; --fg: #e8eaed; --muted: #a0a8b3; --card: #1c2027; --border: #2c323b;
+        --accent: #6ea0ff; --accent-fg: #0b1220; --warn-bg: #2a2416; --warn-border: #8a6d2c;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #121418; --fg: #e8eaed; --muted: #a0a8b3; --card: #1c2027; --border: #2c323b;
+      --accent: #6ea0ff; --accent-fg: #0b1220; --warn-bg: #2a2416; --warn-border: #8a6d2c;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 8px; }
+    h2 { font-size: 1.2rem; margin: 36px 0 8px; }
+    p.lead { color: var(--muted); margin: 0 0 24px; }
+    a { color: var(--accent); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    .warn { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 10px; padding: 14px 16px; margin: 0 0 24px; }
+    .install { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+    .version { color: var(--muted); font-size: .9rem; }
+    ol, ul { padding-left: 1.3em; }
+    li { margin: 4px 0; }
+    fieldset.devices { border: 0; padding: 0; margin: 0 0 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    fieldset.devices legend { font-weight: 600; margin-bottom: 8px; padding: 0; }
+    .devices label {
+      display: block; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+      cursor: pointer; background: var(--bg);
+    }
+    .devices label small { display: block; color: var(--muted); font-size: .85rem; }
+    .devices input { position: absolute; opacity: 0; pointer-events: none; }
+    .devices input:checked + label { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .devices input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (max-width: 480px) { fieldset.devices { grid-template-columns: 1fr; } }
+    esp-web-install-button button[slot="activate"] {
+      font: inherit; font-weight: 600; color: var(--accent-fg); background: var(--accent);
+      border: 0; border-radius: 8px; padding: 10px 22px; cursor: pointer;
+    }
+    .small { color: var(--muted); font-size: .92rem; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Hark firmware for voice satellites</h1>
+  <p class="lead">
+    The stock firmware for your device with one extra setting: <strong>Wake word engine location</strong>.
+    Flip it to <em>In Home Assistant</em> and the satellite streams its microphone to Home Assistant,
+    so <a href="https://github.com/pioborgelt/hark">Hark</a> can listen for any wake phrase you type.
+    Left on <em>On device</em>, it behaves identically to the original firmware.
+  </p>
+
+  <fieldset class="devices">
+    <legend>Your device</legend>
+    <input type="radio" name="device" id="dev-voice-pe" value="voice-pe" checked>
+    <label for="dev-voice-pe">Home Assistant Voice PE<small>16 MB flash (standard model), based on official 26.11.0</small></label>
+    <input type="radio" name="device" id="dev-respeaker-lite" value="respeaker-lite">
+    <label for="dev-respeaker-lite">ReSpeaker Lite<small>XIAO ESP32-S3 kit, based on formatBCE's 2026.11.1</small></label>
+  </fieldset>
+
+  <div class="warn" data-device="voice-pe">
+    <strong>Test build (16 MB Voice PE only).</strong> This targets the standard 16 MB Voice PE —
+    the 8 MB variant isn't supported yet. The streaming logic was tested end-to-end on a ReSpeaker Lite
+    and is now being tried on real Voice PEs. Feedback is super welcome in
+    <a href="https://github.com/pioborgelt/hark/issues/1">issue #1</a>, and you can flash back to stock
+    over USB anytime (see below).
+  </div>
+  <div class="warn" data-device="respeaker-lite" hidden>
+    <strong>Test build.</strong> Tested on real ReSpeaker Lite hardware (XIAO ESP32-S3 with U.FL antenna
+    and XMOS 48 kHz I2S firmware 1.1.0+). Feedback is super welcome in
+    <a href="https://github.com/pioborgelt/hark/issues/1">issue #1</a>.
+  </div>
+
+  <div class="card install">
+    <strong>Install over USB (once)</strong>
+    <ol>
+      <li>Connect the <span class="dev-name">Voice PE</span> to your computer with a USB-C <em>data</em> cable.</li>
+      <li>Open this page in Chrome or Edge on Windows, macOS or Linux (not a phone).</li>
+      <li>Click the button, pick the device in the port list and follow the prompts.
+        Flashing over USB wipes the device, so it will ask for your Wi-Fi at the end.</li>
+    </ol>
+    <esp-web-install-button id="installer" manifest="voice-pe/manifest.json">
+      <button slot="activate">Install Hark firmware</button>
+      <span slot="unsupported">Your browser can't talk to USB devices. Open this page in Chrome or Edge on a computer.</span>
+      <span slot="not-allowed">This page needs to be opened over HTTPS.</span>
+    </esp-web-install-button>
+    <span class="version" id="version"></span>
+  </div>
+
+  <h2>After installing</h2>
+  <ol>
+    <li>Set up the Hark app and an assistant with speech-to-text (see the
+      <a href="https://github.com/pioborgelt/hark/blob/main/hark_addon/DOCS.md">Hark app documentation</a>).</li>
+    <li>Add the <span class="dev-name">Voice PE</span> in Home Assistant (Settings &gt; Devices &amp; services, "Discovered") if it isn't there yet.</li>
+    <li>On its device page, set <strong>Assistant</strong> to the assistant using Hark.
+      Satellites don't follow the "preferred" assistant.</li>
+    <li>Set <strong>Wake word engine location</strong> to <strong>In Home Assistant</strong>.</li>
+    <li>Say your wake word, pause a beat, and speak your command.</li>
+  </ol>
+  <p class="small">
+    Need the full walkthrough or hit a snag? Check the
+    <a href="https://github.com/pioborgelt/hark/blob/main/docs/ESP32_SATELLITE.md">ESP32 satellite guide</a>.
+    The center button, mute switch, timers and the "stop" word work just like stock; built-in wake words
+    ("Okay Nabu", etc.) stay quiet in this mode.
+    <em>Streaming status</em> and <em>Voice phase</em> under Diagnostic show what the device is doing.
+  </p>
+  <p class="small" data-device="respeaker-lite" hidden>
+    This build doesn't include Bluetooth Wi-Fi provisioning. To change Wi-Fi later, plug it in over USB
+    and use this page or <a href="https://web.esphome.io">web.esphome.io</a>.
+  </p>
+
+  <h2>Updates</h2>
+  <p>
+    You only need USB once. New Hark builds show up as regular firmware updates right on the device page
+    in Home Assistant — pulled from this page instead of upstream, so updating keeps the switch.
+  </p>
+
+  <h2>Going back to stock firmware</h2>
+  <p data-device="voice-pe">
+    Flash the official firmware over USB using the
+    <a href="https://esphome.github.io/home-assistant-voice-pe/">Voice PE installer</a>.
+    Updates then come from Nabu Casa again.
+  </p>
+  <p data-device="respeaker-lite" hidden>
+    Flash formatBCE's firmware over USB using the
+    <a href="https://formatbce.github.io/Respeaker-ESPHome-integration/lite/">ReSpeaker Lite installer</a>.
+  </p>
+</main>
+<script>
+  const DEVICES = {
+    'voice-pe': { name: 'Voice PE' },
+    'respeaker-lite': { name: 'ReSpeaker Lite' },
+  };
+  const installer = document.getElementById('installer');
+  const versionEl = document.getElementById('version');
+
+  function select(device) {
+    if (!DEVICES[device]) device = 'voice-pe';
+    document.getElementById('dev-' + device).checked = true;
+    installer.setAttribute('manifest', device + '/manifest.json');
+    document.querySelectorAll('[data-device]').forEach(el => { el.hidden = el.dataset.device !== device; });
+    document.querySelectorAll('.dev-name').forEach(el => { el.textContent = DEVICES[device].name; });
+    versionEl.textContent = '';
+    fetch(device + '/manifest.json').then(r => r.ok ? r.json() : null).then(m => {
+      if (!document.getElementById('dev-' + device).checked) return;
+      versionEl.textContent = m && m.version ? 'Version ' + m.version : 'No firmware published yet.';
+    }).catch(() => { versionEl.textContent = 'No firmware published yet.'; });
+  }
+
+  document.querySelectorAll('input[name="device"]').forEach(input => {
+    input.addEventListener('change', () => {
+      history.replaceState(null, '', '#' + input.value);
+      select(input.value);
+    });
+  });
+  select(location.hash.slice(1));
+</script>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.5.2/dist/web/install-button.js?module"></script>
+</body>
+</html>

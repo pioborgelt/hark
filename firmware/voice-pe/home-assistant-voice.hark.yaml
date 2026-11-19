@@ -1,0 +1,79 @@
+# =============================================================================
+# Home Assistant Voice PE — official firmware 26.11.0 (beta) + Hark streaming switch
+#
+# UNTESTED ON REAL HARDWARE. Same logic as the ReSpeaker Lite test build
+# (firmware/respeaker), ported to the Voice PE configuration.
+#
+# Differences to home-assistant-voice.factory.yaml:
+#   - includes hark-streaming.yaml (select "Wake word engine location",
+#     diagnostics) after the official configuration
+#   - the "Firmware" update entity follows the Hark releases
+#     (https://pioborgelt.github.io/hark/firmware/), not the official ones,
+#     so an update keeps the switch. No beta channel switch, no dashboard import.
+#   - to go back, flash the official firmware with
+#     https://esphome.github.io/home-assistant-voice-pe/
+#
+# Build: esphome -s hark_fw_version <version> compile home-assistant-voice.hark.yaml
+# (CI: .github/workflows/firmware.yml)
+# =============================================================================
+
+substitutions:
+  hark_mute_switch: master_mute_switch
+  # Release version; the update entity compares it with the manifest
+  hark_fw_version: 26.11.0-hark2
+  hark_update_source: https://pioborgelt.github.io/hark/firmware/voice-pe/manifest.json
+
+packages:
+  # This is an inline package to prefix the on_client_connected with the wait_until action
+  # (copied from home-assistant-voice.factory.yaml)
+  va_connected_wait_for_ble:
+    voice_assistant:
+      on_client_connected:
+        - wait_until:
+            not: ble.enabled
+        - delay: 2s
+    wifi:
+      on_disconnect:
+        - ble.enable:
+  home-assistant-voice: !include home-assistant-voice.yaml
+  hark-streaming: !include hark-streaming.yaml
+
+esphome:
+  project:
+    name: Hark.Home Assistant Voice PE
+    version: ${hark_fw_version}
+
+ota:
+  - platform: http_request
+    id: ota_http_request
+
+http_request:
+
+update:
+  - platform: http_request
+    name: None
+    id: update_http_request
+    source: ${hark_update_source}
+
+wifi:
+  on_connect:
+    - delay: 5s  # Gives time for improv results to be transmitted
+    - ble.disable:
+    - script.execute: control_leds
+
+improv_serial:
+
+esp32_ble:
+  name: ha-voice-pe
+
+esp32_improv:
+  authorizer: center_button
+  on_start:
+    - lambda: id(improv_ble_in_progress) = true;
+    - script.execute: control_leds
+  on_provisioned:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds
+  on_stop:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds

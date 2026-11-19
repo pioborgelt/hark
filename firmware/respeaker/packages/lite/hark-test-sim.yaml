@@ -1,0 +1,59 @@
+# =============================================================================
+# Hark test build — simulation buttons for the ReSpeaker Lite
+#
+# The ReSpeaker Lite has a user button (= Voice PE center button) and a mute
+# button, but no LED ring, no dial and no physical mute slider. These buttons
+# let Home Assistant trigger the same code paths as the real Voice PE inputs.
+# The diagnostics (phase, streaming, ducking) come from hark-streaming.yaml.
+# Only for testing; the Voice PE build does not contain this file.
+# =============================================================================
+
+button:
+  - platform: template
+    id: sim_center_button
+    name: "Sim: center button press"
+    icon: mdi:gesture-tap-button
+    on_press:
+      - script.execute: center_button_single_click
+  - platform: template
+    id: sim_timer_rings
+    name: "Sim: timer rings"
+    icon: mdi:timer-alert
+    on_press:
+      - switch.turn_on: timer_ringing
+  - platform: template
+    id: sim_stop_word
+    name: "Sim: stop word"
+    icon: mdi:hand-back-left
+    on_press:
+      - script.execute:
+          id: device_wake_word_detected
+          wake_word: "Stop"
+  - platform: template
+    id: sim_device_wake_word
+    name: "Sim: on-device wake word (Okay Nabu)"
+    icon: mdi:account-voice
+    on_press:
+      - script.execute:
+          id: device_wake_word_detected
+          wake_word: "Okay Nabu"
+  - platform: template
+    id: sim_announcement
+    name: "Sim: short announcement"
+    icon: mdi:bullhorn
+    on_press:
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: "timer_finished_sound"
+
+# Test diagnostics: Wi-Fi quality and uptime (shows reboots)
+sensor:
+  - platform: wifi_signal
+    name: "Test: Wi-Fi signal"
+    update_interval: 30s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Test: uptime"
+    update_interval: 30s
+    entity_category: diagnostic

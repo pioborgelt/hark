@@ -1,0 +1,106 @@
+name: Build Hark firmware
+
+# Builds the Hark firmware for the Home Assistant Voice PE (firmware/voice-pe)
+# and the ReSpeaker Lite (firmware/respeaker) and publishes both as one GitHub
+# release. The Pages workflow then puts the newest release on
+# https://pioborgelt.github.io/hark/firmware/ (install page + update manifests).
+#
+# Release: push a tag like  firmware-hark3
+# Each device gets "<upstream version>-hark3" (e.g. 26.11.0-hark3 for the
+# Voice PE); devices offer an update when it differs from theirs.
+
+on:
+  push:
+    tags: ["firmware-hark*"]
+  pull_request:
+    paths:
+      - "firmware/voice-pe/**"
+      - "firmware/respeaker/**"
+      - "firmware/make_manifest.py"
+      - ".github/workflows/firmware.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  ESPHOME_VERSION: "2026.11.0b4"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: voice-pe
+            dir: firmware/voice-pe
+            yaml: home-assistant-voice.hark.yaml
+            build_name: home-assistant-voice
+            upstream: 26.11.0
+          - device: respeaker-lite
+            dir: firmware/respeaker/config
+            yaml: hark-respeaker.yaml
+            build_name: hark-respeaker
+            upstream: 2026.11.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/firmware-hark* ]]; then
+            echo "version=${{ matrix.upstream }}-${GITHUB_REF#refs/tags/firmware-}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ matrix.upstream }}-dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install ESPHome
+        run: python -m pip install "esphome==${ESPHOME_VERSION}"
+
+      - name: Build
+        working-directory: ${{ matrix.dir }}
+        run: |
+          esphome -s hark_fw_version "${{ steps.version.outputs.version }}" config ${{ matrix.yaml }} > /dev/null
+          esphome -s hark_fw_version "${{ steps.version.outputs.version }}" compile ${{ matrix.yaml }}
+
+      - name: Collect binaries
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          b="${{ matrix.dir }}/.esphome/build/${{ matrix.build_name }}/build"
+          mkdir -p out
+          cp "$b/firmware.factory.bin" "out/hark-${{ matrix.device }}-$v.factory.bin"
+          cp "$b/firmware.ota.bin" "out/hark-${{ matrix.device }}-$v.ota.bin"
+          python firmware/make_manifest.py out ${{ matrix.device }}
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hark-${{ matrix.device }}-${{ steps.version.outputs.version }}
+          path: out/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/firmware-hark')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" out/*.bin -R "${{ github.repository }}" \
+            --title "Firmware $tag" --prerelease \
+            --notes "Hark firmware for the Home Assistant Voice PE and the ReSpeaker Lite. Install: https://pioborgelt.github.io/hark/firmware/"
+          # Publish it on the Pages site (install page + update manifests)
+          gh workflow run pages.yml --ref main -R "${{ github.repository }}"

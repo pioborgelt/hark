@@ -1,0 +1,79 @@
+# =============================================================================
+# Hark TEST firmware for the ReSpeaker Lite (XIAO ESP32-S3)
+#
+# = formatBCE Respeaker Lite satellite 2026.11.1 (factory config)
+#   + Hark streaming switch ("Wake word engine location")
+#   + simulation buttons and diagnostics for testing
+#
+# Not for daily use. Do not "adopt" it in the ESPHome dashboard: adoption would
+# replace it with the original firmware without the Hark changes.
+# Build: see firmware/README.md
+# =============================================================================
+
+substitutions:
+  respeaker_lite_ref: 2026.11.1
+
+packages:
+  core_base: !include ../packages/core/base.yaml
+  core_voice_assistant: !include ../packages/core/voice-assistant.yaml
+  core_media_player: !include ../packages/core/media-player.yaml
+  core_timers_alarm: !include ../packages/core/timers-alarm.yaml
+  core_controls: !include ../packages/core/controls.yaml
+  respeaker_lite_hardware: !include ../packages/respeaker-lite/hardware.yaml
+  lite_device: !include ../packages/lite/device.yaml
+  hark_streaming: !include ../packages/core/hark-streaming.yaml
+  hark_test_sim: !include ../packages/lite/hark-test-sim.yaml
+  # BLE and Wi-Fi share the radio. Disable BLE while Wi-Fi is up, and wait for
+  # that before the voice assistant starts. (from the factory config)
+  va_connected_wait_for_ble:
+    voice_assistant:
+      on_client_connected:
+        - wait_until:
+            not: ble.enabled
+        - delay: 2s
+    wifi:
+      on_disconnect:
+        - ble.enable:
+
+esphome:
+  name: hark-respeaker-test
+  friendly_name: Hark ReSpeaker Test
+  project:
+    name: hark.respeaker-lite-test
+    version: 2026.11.1-hark2
+
+wifi:
+  on_connect:
+    - delay: 5s
+    - ble.disable:
+    - script.execute: control_leds
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+
+# ESPHome's voice_assistant with the Hark patch (firmware/patch_voice_assistant.py):
+# ignores a RUN_END that belongs to an earlier pipeline run
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [voice_assistant]
+
+# Wi-Fi setup over USB (web.esphome.io) or Bluetooth (push the user button to
+# authorize Improv BLE)
+improv_serial:
+
+esp32_ble:
+
+improv_ble:
+  authorizer: user_button
+  on_start:
+    - lambda: id(improv_ble_in_progress) = true;
+    - script.execute: control_leds
+  on_provisioned:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds
+  on_stop:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds

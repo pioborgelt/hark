@@ -1,0 +1,8 @@
+# Probe build: same as hark-respeaker-test.yaml, but the XMOS auto-update can
+# never start (minimum version 99.0.0). Only logs the XMOS firmware version.
+packages:
+  test: !include hark-respeaker-test.yaml
+
+respeaker_lite:
+  firmware:
+    auto_update_min_version: "99.0.0"
