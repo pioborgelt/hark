@@ -71,7 +71,7 @@ actions:
 mode: single
 ```
 
-Hark starts before Home Assistant itself, so it's ready when satellites connect. The Whisper app starts later though, which is why you still need the automation after a reboot. I haven't tried ESPHome devices like the Voice PE yet. If you have one, I'd love to know whether it recovers on its own.
+Hark starts before Home Assistant itself, so it's ready when satellites connect. The Whisper app starts later though, which is why you still need the automation after a reboot. ESPHome satellites behave better here: on a ReSpeaker Lite with the Hark firmware, streaming comes back on its own after a Home Assistant restart (and backs off cleanly if Hark is temporarily down instead of getting stuck).
 
 ### The first word of my command is missing ("...time is it?")
 
@@ -128,7 +128,7 @@ The update restarts Hark, and Linux satellites go quiet until you reload them. S
 
 ### Does Hark run on my ESP32 or Voice PE?
 
-No, Hark runs on your Home Assistant machine and the device streams its audio there. On a Home Assistant Voice PE or another ESPHome device, set the wake word location to "In Home Assistant" instead of "On device". If you use `wyoming-satellite` on a Raspberry Pi or Linux PC, run it without a local wake word service.
+No, Hark runs on your Home Assistant machine and the satellite streams its audio there. Stock Voice PE and ReSpeaker Lite firmware only listen on-device, so flash the Hark firmware first — see [ESP32 satellites](ESP32_SATELLITE.md). It adds a "Wake word engine location" switch; flip it to "In Home Assistant" and you're set. Devices like the ESP32-S3-Box or M5Stack Atom Echo already have that setting out of the box. If you use `wyoming-satellite` on a Raspberry Pi or Linux PC, run it without a local wake word service.
 
 ### Can I use several phrases at once?
 

@@ -13,7 +13,7 @@ I originally built Hark for my own voice assistant, PAI. Its old wake-word engin
 
 ## Getting started
 
-Hark only does the wake word part. Your voice assistant still needs speech-to-text and text-to-speech (the Whisper or Speech-to-Phrase app plus Piper work fine), and some device that streams its microphone to Home Assistant. If you get stuck anywhere, the [FAQ](docs/FAQ.md) probably has it.
+Hark only does the wake word part. Your voice assistant still needs speech-to-text and text-to-speech (the Whisper or Speech-to-Phrase app plus Piper work fine), and a satellite that streams its microphone to Home Assistant — if you're using a Voice PE or ReSpeaker Lite, see the [ESP32 satellite guide](docs/ESP32_SATELLITE.md). If you get stuck anywhere, the [FAQ](docs/FAQ.md) probably has it.
 
 ### Home Assistant OS (easiest)
 
@@ -45,7 +45,7 @@ docker run -d --name wyoming-hark --restart unless-stopped \
 
 You can also clone the repo and run `docker compose up -d`. On the first start it downloads about 31 MB of model weights into `./hark-data`.
 
-Then add it in Home Assistant under Settings > Devices & services > Add integration > Wyoming Protocol, with the IP of the machine running the container and port 10400. Pick it in your assistant the same way as in step 5 above. If you have a Voice PE or another ESPHome device, switch its wake word setting from "On device" to "In Home Assistant".
+Then add it in Home Assistant under Settings > Devices & services > Add integration > Wyoming Protocol, with the IP of the machine running the container and port 10400. Pick it in your assistant the same way as in step 5 above. If you have a Voice PE or ReSpeaker Lite, flash the Hark firmware first — see [ESP32 satellites](docs/ESP32_SATELLITE.md). On other ESPHome devices that already have the setting (ESP32-S3-Box, M5Stack Atom Echo), switch the wake word engine location from "On device" to "In Home Assistant".
 
 ### Python
 
