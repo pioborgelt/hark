@@ -24,7 +24,7 @@ Now say the wake word, pause briefly (or wait for the chime) and then say your c
 
 ## Which devices work with it?
 
-Hark runs on your Home Assistant machine, not on the microphone device, so the satellite has to send its audio to Home Assistant. Stock Voice PE and ReSpeaker Lite firmware only listen on-device, so flash the Hark firmware first — see the [ESP32 satellite guide](https://github.com/pioborgelt/hark/blob/main/docs/ESP32_SATELLITE.md). It adds a "Wake word engine location" switch; set it to "In Home Assistant". Devices like the ESP32-S3-Box or M5Stack Atom Echo already have this setting. If you use `wyoming-satellite` on a Raspberry Pi or Linux PC, run it without a local wake word service.
+Hark runs on your Home Assistant machine, not on the microphone device, so the satellite has to send its audio to Home Assistant. Voice PE and ReSpeaker Lite need the Hark firmware for that ([ESP32 satellites](https://github.com/pioborgelt/hark/blob/main/docs/ESP32_SATELLITE.md)), which adds a "Wake word engine location" switch to set to "In Home Assistant". Devices like the ESP32-S3-Box or M5Stack Atom Echo already have this setting. If you use `wyoming-satellite` on a Raspberry Pi or Linux PC, run it without a local wake word service.
 
 ## When something doesn't work
 
